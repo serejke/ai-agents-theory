@@ -1,4 +1,4 @@
-# Agent Primitives
+# AI Agents Theory
 
 Theoretical repository formalizing the building blocks of AI agent systems.
 

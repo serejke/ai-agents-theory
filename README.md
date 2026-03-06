@@ -1,4 +1,4 @@
-# Agent Primitives
+# AI Agents Theory
 
 A first-principles formalization of the building blocks of AI agent systems — what bricks tools like Claude Code, Devin, Codex, Cursor, and GitHub Actions are assembled from, and what new systems can be built from them.
 
