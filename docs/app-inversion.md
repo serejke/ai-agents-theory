@@ -1,6 +1,14 @@
 # App Inversion — How Applications Decompose in the Agent World
 
-How does the rise of AI agents change what "building an app" means? This document examines the structural shift from app-centric to agent-centric software — what inverts, what stays, and where the boundaries are.
+## The Problem
+
+You build an app: backend, database, frontend, deployment pipeline. Six months later the UX layer is obsolete — users interact through agents, not dashboards. Another team wraps your API in a Tool definition and your carefully crafted UI becomes irrelevant. You've seen this cycle before with mobile-first killing desktop UIs, but this time it's faster and more fundamental.
+
+The question isn't _whether_ apps will decompose into agent-callable pieces. The question is: **which parts of your system survive, which get replaced, and how do you architect for this from day one?**
+
+This document gives you a mental model for that. It decomposes the traditional app into layers, shows which ones invert in the agent world and which stay exactly as they are, and identifies the architectural boundary (the Tool interface) that separates agent-native code from regular software engineering.
+
+**Who this is for:** Engineers building software today who want to understand where the architecture is heading — not to chase hype, but to stop building systems that become legacy in one month.
 
 Related: [Agent Primitives](agent-primitives.md), [Agent Patterns](agent-patterns.md), [Memory](memory.md)
 
@@ -213,10 +221,21 @@ Four things converged to make App Inversion viable:
 
 ---
 
-## Provocative Observation
+## What This Means for What You Build
 
 If apps dissolve into tools, then **app companies become API providers** — whether they intend to or not. Many already are: most SaaS products offer REST APIs that expose full functionality. The custom UI they built is what gets replaced by agent-driven interfaces. Their data, their API, and their business logic survive. Their frontend doesn't.
 
 This isn't hypothetical — it's already happening. MCP servers wrap existing APIs into tool definitions. Function calling schemas map directly to REST endpoints. The "integration" work that used to take weeks (build an adapter, handle auth, parse responses, build UI) now takes minutes (define a tool schema, point it at the API).
 
 The apps that survive are the ones with **irreplaceable Service Layers** — proprietary data, complex data processing, regulatory compliance, real-time infrastructure. The apps that don't survive are the ones whose primary value was a nice UI over a simple API. The UI layer is precisely what agents replace.
+
+### The Practical Takeaway
+
+When you architect a system today, ask yourself:
+
+1. **What's my Service Layer?** — What proprietary data, processing, or infrastructure makes my system valuable regardless of interface? Invest here. This is your moat.
+2. **Is my UI the product, or is it a view over the product?** — If it's a view, design the API first and treat the UI as one consumer among many (agents being the others).
+3. **Where's my Tool boundary?** — Define `execute(params) → result` interfaces early. Everything above the boundary is replaceable by agents. Everything below is regular engineering that persists.
+4. **Am I building an app or a capability?** — An app bundles UI + logic + data into a monolith. A capability exposes logic + data through a clean interface that any consumer — human UI, agent, another service — can use.
+
+The shift isn't "throw away your backend and use AI." It's: **build the Service Layer properly, expose it through Tool-shaped interfaces, and stop over-investing in UI that agents will replace.**
