@@ -62,11 +62,13 @@ const personalAgent: AgentDeployment = {
 
 Three things invert simultaneously:
 
-| Aspect           | Traditional App                                                      | Agent                                                                              |
-| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| **Interface**    | Each app builds its own UI. User learns N interfaces for N use cases | One conversational interface. Agent presents information as the user needs it      |
-| **Logic**        | Business rules hardcoded. Each new feature = new code                | Reasoning is general-purpose. Each new feature = new tool or updated system prompt |
-| **Control flow** | App dictates the workflow (screens, forms, navigation steps)         | User states intent, agent decides the workflow                                     |
+| Aspect           | Traditional App                                                      | Agent                                                                                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Interface**    | Each app builds its own UI. User learns N interfaces for N use cases | Agent handles intent and reasoning conversationally. Rich UI (dashboards, charts, guided forms) persists where the modality itself carries value — agent and UI become peers, not replacements |
+| **Logic**        | Business rules hardcoded. Each new feature = new code                | Reasoning is general-purpose. Each new feature = new tool or updated system prompt                                                                                                             |
+| **Control flow** | App dictates the workflow (screens, forms, navigation steps)         | User states intent, agent decides the workflow                                                                                                                                                 |
+
+The Interface inversion is selective. Some UI is a **view** — a data display the agent can narrate equally well (a list of recent expenses, a text summary, a status report). Views invert. But some UI is a **medium** — the modality itself carries irreplaceable value: a 6-month net worth chart communicates a trend in one glance, a guided expense entry form is faster and less error-prone than free-text, a portfolio dashboard with color-coded allocation drift creates spatial understanding no conversation can match. Mediums persist alongside the agent as peers over shared infrastructure.
 
 ---
 
@@ -86,15 +88,23 @@ Not everything inverts. Analyzing real systems reveals three distinct layers wit
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│         INTERFACE & REASONING LAYER                  │  ← INVERTS
-│  Agent: LLM + Tools + Memory + Guardrails            │
-│  Replaces: dashboards, fixed UIs, manual queries     │
-│  Intent-driven, adaptive, cross-domain reasoning     │
+│         INTERFACE LAYER                              │
+│                                                      │
+│  ┌────────────────────┐  ┌────────────────────────┐ │
+│  │  Agent (inverts)    │  │  Rich UI (persists)    │ │
+│  │  Conversation,      │  │  Dashboards, charts,   │ │
+│  │  reasoning,         │  │  guided forms,         │ │
+│  │  cross-domain       │  │  visualizations        │ │
+│  │  intent routing     │  │                        │ │
+│  └──────────┬─────────┘  └────────────┬───────────┘ │
+│             └─────────────┬───────────┘              │
+│                           ↓                          │
+│                   Tool boundary                      │
 ├─────────────────────────────────────────────────────┤
-│         SERVICE LAYER                                │  ← STAYS TRADITIONAL
-│  Stateful backends: databases, ETL pipelines,        │
-│  API gateways, job queues, data warehouses           │
-│  Long-lived, deterministic, no reasoning needed      │
+│         SERVICE LAYER                                │  ← STAYS
+│  Everything whose computation cost exceeds the       │
+│  agent's per-request budget: databases, ETL          │
+│  pipelines, async analytics, batch LLM jobs          │
 ├─────────────────────────────────────────────────────┤
 │         SOURCE LAYER                                 │  ← EXTERNAL
 │  Third-party systems: SaaS APIs, exchanges,          │
@@ -103,40 +113,69 @@ Not everything inverts. Analyzing real systems reveals three distinct layers wit
 └─────────────────────────────────────────────────────┘
 ```
 
-### Interface & Reasoning Layer (inverts)
+### Interface Layer (partially inverts)
 
-This is where App Inversion happens. Fixed UIs — dashboards, command menus, web forms, mobile screens — are replaced by an agent that queries, reasons, and responds to intent.
-
-Consider a person who uses separate apps for time tracking, expense management, and local event discovery. Each app has its own UI, its own data, its own login. In the agent model, all three become tool sets within a single agent. This unlocks capabilities that no individual app can provide:
+This is where App Inversion happens — but selectively. The agent takes over intent interpretation, cross-domain reasoning, and conversational access. Consider a person who uses separate apps for time tracking, expense management, and local event discovery. Each app has its own UI, its own data, its own login. In the agent model, all three become tool sets within a single agent. This unlocks capabilities that no individual app can provide:
 
 - **Cross-domain reasoning**: "I worked 60 hours last week but spent more on dining out than usual — am I compensating for overwork?" — requires joining data from the time tracker and expense manager, which live in separate apps with no shared context
 - **Proactive behavior**: the agent notices you haven't logged any work hours in 3 days and asks what happened — requires monitoring across tools and taking initiative, not waiting for the user to open an app
 - **Personalization via Memory**: the agent remembers that you prefer electronic music and filters event recommendations accordingly, without you configuring each app separately
 - **Natural routing**: you say "what's happening in the city this weekend?" and the agent queries event sources — you don't pick which app to open, you state what you need
 
-### Service Layer (stays traditional)
+Rich UI persists where the modality carries value: a portfolio dashboard with allocation tiers and trend charts, guided forms for structured data entry, visualizations that compress complex state into a glance. Agent and rich UI are **peers** — both consume the same Service Layer through the same Tool boundary, each better at different things.
 
-Stateful infrastructure doesn't invert — and shouldn't. Databases, ETL pipelines, scheduled data syncs, job queues — these are deterministic systems that don't benefit from LLM reasoning. They provide the **data freshness and structure** that agent Tools depend on.
+### Service Layer (stays)
 
-Consider a portfolio tracking system that syncs prices from market data APIs hourly, stores them in a relational database, and computes analytics views by joining holdings with historical prices. This is a classic ETL pipeline — extract, transform, load — running on a scheduler. No reasoning required, just reliable data plumbing.
+The Service Layer is defined not by the absence of reasoning, but by a **computation threshold**: everything whose cost exceeds a single agent interaction budget lives here. This includes both deterministic infrastructure and LLM-powered pipelines.
+
+Consider a portfolio tracking system. Part of it is a classic ETL pipeline: sync prices from market data APIs hourly, store them in a relational database, compute analytics views by joining holdings with historical prices. No reasoning required, just reliable data plumbing.
+
+But another part — an aggregate report pipeline — fetches on-chain data from remote RPCs, runs multi-stage dimensional analysis, assembles the results, and feeds them to an LLM for narrative generation. This pipeline takes minutes, has intermediate artifacts, and uses LLM reasoning. Yet it belongs in the Service Layer because its computation cost far exceeds what any single agent interaction can afford.
+
+The boundary between "agent reasons live" and "Service Layer handles it" is a cost function:
+
+```
+interaction_budget = f(acceptable_latency, token_cost, API_rate_limits)
+computation_cost   = f(data_volume, processing_stages, external_calls, LLM_passes)
+
+if computation_cost ≤ interaction_budget → agent handles it live
+if computation_cost > interaction_budget → extract into Service Layer
+```
+
+This creates a spectrum:
+
+| Mode                            | Latency       | Example                                              |
+| ------------------------------- | ------------- | ---------------------------------------------------- |
+| **Per-request agent reasoning** | Seconds       | "What's my runway?" → SQL query → agent narrates     |
+| **Cached analytical views**     | Pre-computed  | Materialized SQL views, pre-aggregated JSON          |
+| **Background subagent**         | Minutes       | Async task: "analyze spending patterns this quarter" |
+| **Full pipeline**               | Minutes–hours | Multi-stage dim analysis, batch LLM passes           |
+
+The agent can **trigger** any of these modes and **consume** their results. It just can't **be** all of them within a single interaction.
 
 The agent doesn't replace this infrastructure. It sits on top:
 
 ```typescript
-// The agent sees a simple Tool:
+// The agent sees simple Tools:
 const queryPortfolio: Tool = {
   name: "query_portfolio",
   execute: (params) => sql(`SELECT * FROM analytics.net_worth`),
 };
 
-// But behind that Tool lives:
+// And can trigger expensive computation:
+const triggerAggregate: Tool = {
+  name: "run_aggregate_report",
+  execute: () => triggerPipeline("aggregate"),
+  // Returns: "Pipeline started. Results available in ~5 minutes."
+};
+
+// But behind these tools lives:
 // - Scheduled pipelines syncing data from 4 sources hourly
 // - A relational database with multiple schemas and migrations
 // - Analytics views joining raw data into queryable aggregations
-// - Rate limiters, retry logic, SSH tunnels to remote databases
+// - Multi-stage LLM-powered report generation
+// - Rate limiters, retry logic, connection pooling
 ```
-
-The agent replaces the dashboard layer with intent-driven queries. The data infrastructure underneath stays exactly as it was.
 
 The Tool's `execute(params) → result` is the architectural boundary. Everything above it is agent primitives (LLM, Memory, Guardrails). Everything below it is regular software engineering. The agent doesn't know or care what lives behind the Tool interface — and it shouldn't.
 
@@ -152,9 +191,11 @@ Everything below:   Regular software (databases, pipelines, APIs, infrastructure
 
 Third-party systems that provide raw data or services. Not under your control. The Service Layer ingests from them; the Agent Layer uses them via Tools. Examples: SaaS APIs (time tracking, project management), market data providers, payment processors, social media feeds.
 
-### The spectrum
+---
 
-The split across layers doesn't mean apps fully dissolve. An app can keep its own database, its own guided UX, even its own AI layer — but in the agent model it becomes a Tool that the agent calls and combines with other tools.
+## The Inversion Is Partial
+
+Apps don't dissolve into nothing — they dissolve into **tools that may still be full apps internally.** An expense tracker keeps its database, its guided entry forms, even its own AI layer for intent parsing. But in the agent model it becomes a Tool that the agent calls and combines with other tools.
 
 ```
 Full traditional:  User → App (UI + Logic + Data)
@@ -162,16 +203,13 @@ Partial inversion: User → Agent → Tool (still a full app internally)
 Full inversion:    User → Agent → Tool (thin wrapper over API)
 ```
 
-Most real systems will live in the **partial** zone. What stays traditional and what inverts depends on the nature of the need:
+Most real systems will live in the **partial** zone. Two forces keep things from fully inverting:
 
-| Need                                             | Stays traditional                       | Inverts to agent                     |
-| ------------------------------------------------ | --------------------------------------- | ------------------------------------ |
-| Structured data (financial records, time series) | Relational database, schema, migrations | —                                    |
-| Guided UX (wizards, step-by-step forms)          | Custom UI with validation               | —                                    |
-| Intent interpretation                            | —                                       | LLM-based reasoning                  |
-| Cross-domain reasoning                           | —                                       | Agent joins data from multiple tools |
-| Personalization                                  | —                                       | Memory-driven adaptation             |
-| Proactive behavior                               | —                                       | Cron triggers + agent initiative     |
+1. **UI as medium.** When the modality itself carries value — charts compress trends into a glance, guided forms constrain input in helpful ways, spatial dashboards create overview that no conversation matches — the interface persists as a peer of the agent, not a replacement target.
+
+2. **Computation threshold.** When the processing cost exceeds a single interaction budget — multi-stage pipelines, bulk data fetches, batch LLM analysis — the work stays in the Service Layer regardless of whether it involves reasoning. The agent triggers and consumes, but can't be the pipeline.
+
+These aren't exceptions to the theory — they define its boundaries. The inversion happens where the agent's conversational modality and per-request budget are sufficient. Where they're not, traditional software persists, and the agent becomes one consumer among several over shared infrastructure.
 
 ---
 
@@ -203,7 +241,7 @@ The unified approach uses the LLM as a natural [Router](agent-patterns.md#router
 | **Tool scaling** | Few tools per agent                     | Many tools in one agent — routing may degrade                                        |
 | **Complexity**   | Simple per agent, complex orchestration | Complex single agent, simple orchestration                                           |
 
-The honest answer: this is an open design question. The Service Layer underneath is the same either way — the question is only about how the Interface & Reasoning Layer is organized.
+The honest answer: this is an open design question. The Service Layer underneath is the same either way — the question is only about how the Interface Layer is organized.
 
 ---
 
@@ -234,11 +272,12 @@ The apps that survive are the ones with **irreplaceable Service Layers** — pro
 When you architect a system today, ask yourself:
 
 1. **What's my Service Layer?** — What proprietary data, processing, or infrastructure makes my system valuable regardless of interface? Invest here. This is your moat.
-2. **Is my UI the product, or is it a view over the product?** — If it's a view, design the API first and treat the UI as one consumer among many (agents being the others).
-3. **Where's my Tool boundary?** — Define `execute(params) → result` interfaces early. Everything above the boundary is replaceable by agents. Everything below is regular engineering that persists.
-4. **Am I building an app or a capability?** — An app bundles UI + logic + data into a monolith. A capability exposes logic + data through a clean interface that any consumer — human UI, agent, another service — can use.
+2. **Is my UI a view or a medium?** — If it's a view over data, the agent will replace it. If the modality itself carries value (charts, spatial layouts, guided forms), keep it — but make it a peer of the agent, consuming the same Tool boundary.
+3. **Where's my Tool boundary?** — Define `execute(params) → result` interfaces early. Everything above the boundary can be consumed by agents, rich UIs, or other services. Everything below is regular engineering.
+4. **Does this computation fit in an interaction?** — If the processing cost (latency, data volume, API calls, LLM passes) fits within a request-response cycle, the agent handles it live. If not, extract it into the Service Layer and give the agent a trigger + a reader.
+5. **Am I building an app or a capability?** — An app bundles UI + logic + data into a monolith. A capability exposes logic + data through a clean interface that any consumer — human UI, agent, another service — can use.
 
-The shift isn't "throw away your backend and use AI." It's: **build the Service Layer properly, expose it through Tool-shaped interfaces, and stop over-investing in UI that agents will replace.**
+The shift isn't "throw away your backend and use AI." It's: **build the Service Layer properly, expose it through Tool-shaped interfaces, and know which of your interfaces are views (replaceable) vs. mediums (keep them as agent peers).**
 
 ---
 
