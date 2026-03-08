@@ -8,6 +8,7 @@ Theoretical repository formalizing the building blocks of AI agent systems.
 - `docs/agent-patterns.md` — Planner, Router, Evaluator, Guardrails, StateMachine
 - `docs/memory.md` — Memory primitive deep dive
 - `docs/channel.md` — Channel primitive and variants
+- `docs/app-inversion.md` — How applications decompose in the agent world
 
 ## Conventions
 

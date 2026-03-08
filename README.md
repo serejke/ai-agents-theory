@@ -14,6 +14,7 @@ This repository formalizes those building blocks using TypeScript-like pseudocod
 2. **[Agent Patterns](docs/agent-patterns.md)** — Planner, Router, Evaluator, Guardrails, State Machine. Which are true primitives and which are compositions?
 3. **[Memory](docs/memory.md)** — The most underdeveloped primitive. Episodic, semantic, procedural memory. Four architectural questions.
 4. **[Channel](docs/channel.md)** — How agents pass intermediate results. Six variants: filesystem, return value, artifact, shared state, mailbox, git.
+5. **[App Inversion](docs/app-inversion.md)** — How applications decompose in the agent world. What inverts, what stays traditional, and the three-layer model.
 
 ## The Primitives Map
 
