@@ -15,6 +15,9 @@ This repository formalizes those building blocks using TypeScript-like pseudocod
 3. **[Memory](docs/memory.md)** — The most underdeveloped primitive. Episodic, semantic, procedural memory. Four architectural questions.
 4. **[Channel](docs/channel.md)** — How agents pass intermediate results. Six variants: filesystem, return value, artifact, shared state, mailbox, git.
 5. **[App Inversion](docs/app-inversion.md)** — How applications decompose in the agent world. What inverts, what stays traditional, and the three-layer model.
+6. **[App Inversion: Economics](docs/app-inversion-economics.md)** — What happens to markets, pricing, and distribution when apps become agent capabilities. Includes case studies:
+   - [GPT Store — Apps in Agent Clothing](docs/app-inversion-economics-gpt-store.md)
+   - [MCP Registries and the Automation Pivot](docs/app-inversion-economics-mcp-registries.md)
 
 ## The Primitives Map
 

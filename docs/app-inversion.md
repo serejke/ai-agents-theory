@@ -239,3 +239,9 @@ When you architect a system today, ask yourself:
 4. **Am I building an app or a capability?** — An app bundles UI + logic + data into a monolith. A capability exposes logic + data through a clean interface that any consumer — human UI, agent, another service — can use.
 
 The shift isn't "throw away your backend and use AI." It's: **build the Service Layer properly, expose it through Tool-shaped interfaces, and stop over-investing in UI that agents will replace.**
+
+---
+
+## Further Reading
+
+This document covers the _architecture_ of App Inversion — which layers decompose and which persist. For the _economics_ — what happens to markets, pricing, distribution, and defensibility when apps become agent capabilities — see [App Inversion: Economics](app-inversion-economics.md).
