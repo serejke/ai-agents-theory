@@ -9,6 +9,7 @@ Theoretical repository formalizing the building blocks of AI agent systems.
 - `docs/memory.md` — Memory primitive deep dive
 - `docs/channel.md` — Channel primitive and variants
 - `docs/app-inversion.md` — How applications decompose in the agent world
+- `docs/workspace.md` — Workspace pattern: where agents operate (filesystem convergence, cognitive affinity, structural navigation)
 - `docs/app-inversion-economics.md` — Economics of agent capabilities (pricing, marketplaces, defensibility)
   - `docs/app-inversion-economics-gpt-store.md` — Case study: GPT Store failure analysis
   - `docs/app-inversion-economics-mcp-registries.md` — Case study: MCP registries and automation platform pivot

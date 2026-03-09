@@ -79,14 +79,14 @@ ContextProviders have two loading strategies:
 
 ```typescript
 // Eager — loaded at session start, always in context window
-type EagerContext = () => string;  // CLAUDE.md, git status, project structure
+type EagerContext = () => string; // CLAUDE.md, git status, project structure
 
 // Lazy — loaded on-demand when the agent decides it needs it
 // Delivered via a Tool (e.g., Claude Code's Skill tool)
 type LazyContext = {
   name: string;
-  description: string;  // agent reads this to decide whether to invoke
-  load: () => string;   // injected only when invoked
+  description: string; // agent reads this to decide whether to invoke
+  load: () => string; // injected only when invoked
 };
 ```
 
@@ -148,18 +148,18 @@ This layer explains why Claude Code CLI, Claude Code SDK, and Claude Code GitHub
 
 ```typescript
 type Trigger =
-  | { type: "cli_stdin"; input: string }       // Claude Code CLI
-  | { type: "sdk_call"; input: string }        // Claude Code SDK
-  | { type: "github_issue"; issue: GitHubIssue }   // GitHub Action
+  | { type: "cli_stdin"; input: string } // Claude Code CLI
+  | { type: "sdk_call"; input: string } // Claude Code SDK
+  | { type: "github_issue"; issue: GitHubIssue } // GitHub Action
   | { type: "github_comment"; comment: GitHubComment } // GitHub Action
-  | { type: "cron"; schedule: string }         // scheduled
-  | { type: "webhook"; payload: unknown };     // external signal
+  | { type: "cron"; schedule: string } // scheduled
+  | { type: "webhook"; payload: unknown }; // external signal
 
 type OutputChannel =
-  | { type: "cli_stdout" }                     // prints to terminal
-  | { type: "github_pr"; repo: string }        // creates PR
+  | { type: "cli_stdout" } // prints to terminal
+  | { type: "github_pr"; repo: string } // creates PR
   | { type: "github_comment"; issueId: number } // writes comment
-  | { type: "file"; path: string };            // writes to file
+  | { type: "file"; path: string }; // writes to file
 
 // "Deployment" — full agent configuration
 type AgentDeployment = {
@@ -174,9 +174,9 @@ type AgentDeployment = {
 
 ```typescript
 type Environment = {
-  code: CodeAccess;    // git clone / local files / read-only
-  runtime?: Runtime;   // npm, node, dev-server, build tools
-  os?: OSAccess;       // gh, git push, ssh, credentials
+  code: CodeAccess; // git clone / local files / read-only
+  runtime?: Runtime; // npm, node, dev-server, build tools
+  os?: OSAccess; // gh, git push, ssh, credentials
 };
 
 // "Light" agent — code only (planning, review, analysis)
@@ -262,6 +262,7 @@ Session ──────────── AgentLoop + history               (
 Planner ──────────── Session with read-only tools      (Session + constraint)
 Router ───────────── dispatch by input                 (function)
 Evaluator ────────── LLM-as-judge + feedback loop      (LLM + loop)
+Workspace ────────── structured data space for agents  (Tool + Channel + Context) (see [Workspace](workspace.md))
 
 === INFRASTRUCTURE ===
 
@@ -290,14 +291,13 @@ Codex, Devin, Gemini CLI, Cursor — different assemblies from the same bricks. 
 
 ## Primitives That Don't Exist Yet But Will Appear
 
-| Primitive | Purpose | Example |
-|---|---|---|
-| **Memory** (persistent) | Knowledge persisting between sessions | Agent remembers decisions from past tasks, author preferences |
-| **Planner** | Task decomposition before AgentLoop | "Break into subtasks, then execute each" |
-| **Evaluator / Verifier** | Verification of agent's result | Screenshot -> vision model -> "does it match the task?" |
-| **Router** | Choosing which agent/model handles request | Light task -> haiku, heavy -> opus |
-| **Guardrails** | Input/output filter | "Don't push to main", "don't delete files" |
-| **State Machine** | Managing work phases | plan -> approve -> implement -> verify -> PR |
+| Primitive                | Purpose                                    | Example                                                       |
+| ------------------------ | ------------------------------------------ | ------------------------------------------------------------- |
+| **Memory** (persistent)  | Knowledge persisting between sessions      | Agent remembers decisions from past tasks, author preferences |
+| **Planner**              | Task decomposition before AgentLoop        | "Break into subtasks, then execute each"                      |
+| **Evaluator / Verifier** | Verification of agent's result             | Screenshot -> vision model -> "does it match the task?"       |
+| **Router**               | Choosing which agent/model handles request | Light task -> haiku, heavy -> opus                            |
+| **Guardrails**           | Input/output filter                        | "Don't push to main", "don't delete files"                    |
+| **State Machine**        | Managing work phases                       | plan -> approve -> implement -> verify -> PR                  |
 
 Especially interesting is **State Machine**: a two-phase workflow ("first propose plan in issue, then code") is a state transition that doesn't exist as an explicit primitive in current systems. Plan mode in Claude Code is an approximation, but hardcoded to two states.
-
