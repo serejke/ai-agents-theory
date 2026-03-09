@@ -13,6 +13,7 @@ Theoretical repository formalizing the building blocks of AI agent systems.
 - `docs/app-inversion-economics.md` — Economics of agent capabilities (pricing, marketplaces, defensibility)
   - `docs/app-inversion-economics-gpt-store.md` — Case study: GPT Store failure analysis
   - `docs/app-inversion-economics-mcp-registries.md` — Case study: MCP registries and automation platform pivot
+- `docs/verification.md` — Verification: traces, seams, five verification strategies
 
 ## Conventions
 
