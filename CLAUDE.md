@@ -20,3 +20,4 @@ Theoretical repository formalizing the building blocks of AI agent systems.
 - Each document is self-contained but links to related docs
 - Primitives are irreducible building blocks; patterns are compositions of primitives
 - No framework-specific content — everything is universal
+- Notes are living thought, not append-only — when adding new insights, integrate into existing structure (rewrite sections, restructure flow). Never patch with "corrections" or "addendum" sections. Git history preserves previous versions
