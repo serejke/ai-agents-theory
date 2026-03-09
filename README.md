@@ -14,8 +14,9 @@ This repository formalizes those building blocks using TypeScript-like pseudocod
 2. **[Agent Patterns](docs/agent-patterns.md)** — Planner, Router, Evaluator, Guardrails, State Machine. Which are true primitives and which are compositions?
 3. **[Memory](docs/memory.md)** — The most underdeveloped primitive. Episodic, semantic, procedural memory. Four architectural questions.
 4. **[Channel](docs/channel.md)** — How agents pass intermediate results. Six variants: filesystem, return value, artifact, shared state, mailbox, git.
-5. **[App Inversion](docs/app-inversion.md)** — How applications decompose in the agent world. What inverts, what stays traditional, and the three-layer model.
-6. **[App Inversion: Economics](docs/app-inversion-economics.md)** — What happens to markets, pricing, and distribution when apps become agent capabilities. Includes case studies:
+5. **[Workspace](docs/workspace.md)** — Where agents operate. Filesystem convergence, cognitive affinity of tool interfaces, structural navigation, permission models.
+6. **[App Inversion](docs/app-inversion.md)** — How applications decompose in the agent world. What inverts, what stays traditional, and the three-layer model.
+7. **[App Inversion: Economics](docs/app-inversion-economics.md)** — What happens to markets, pricing, and distribution when apps become agent capabilities. Includes case studies:
    - [GPT Store — Apps in Agent Clothing](docs/app-inversion-economics-gpt-store.md)
    - [MCP Registries and the Automation Pivot](docs/app-inversion-economics-mcp-registries.md)
 
@@ -38,6 +39,7 @@ Session          AgentLoop + history               (AgentLoop + state)
 Planner          Session with read-only tools      (Session + constraint)
 Router           dispatch by input                 (function)
 Evaluator        LLM-as-judge + feedback loop      (LLM + loop)
+Workspace        structured data space for agents  (Tool + Channel + Context)
 
 === INFRASTRUCTURE ===
 
