@@ -20,6 +20,7 @@ This repository formalizes those building blocks using TypeScript-like pseudocod
    - [GPT Store — Apps in Agent Clothing](docs/app-inversion-economics-gpt-store.md)
    - [MCP Registries and the Automation Pivot](docs/app-inversion-economics-mcp-registries.md)
 8. **[Verification](docs/verification.md)** — How you know an agent system works. Traces, seams, the five verification strategies from shell testing to LLM-as-judge.
+9. **[LangGraph — Case Study](docs/langgraph.md)** — LangGraph decomposed into theory primitives. What it reveals about the theory (cognitive/execution split, concern-bundling, handoff) and what the theory reveals about it (channel constraints, graph vs. imperative orchestration).
 
 ## The Primitives Map
 
