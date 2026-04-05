@@ -72,6 +72,23 @@ In Claude Code, Guardrails manifest as: the permission system ("can it write fil
 
 ---
 
+## Guardrails and Tool Expressiveness
+
+How complete a Guardrail's coverage is depends on where the tool sits on the [expressiveness spectrum](tool.md).
+
+Over **specific tools** (closed action space), Guardrails provide complete coverage. The set of dangerous actions is enumerable. A Guardrail on `file_write` can inspect the path and deterministically allow or deny — no combination of parameters can circumvent it.
+
+Over **generative tools** (open action space — bash, code execution), Guardrails provide pattern-level coverage. They catch known dangerous commands (`rm -rf`, `push --force`) and raise the bar against accidental damage. For complete defense over generative tools, Guardrails compose with environment-level containment:
+
+1. **Specific tools for common operations** — Guardrail interception provides complete coverage
+2. **Pattern-based Guardrails on bash** — catch known dangerous commands at the tool boundary
+3. **Sandboxed environments** — contain blast radius at the environment boundary (network isolation, filesystem restrictions, no credentials)
+4. **Human-in-the-loop** — require approval for commands matching risk patterns
+
+Guardrails enforce constraints at the tool boundary; sandboxes enforce constraints at the environment boundary. For specific tools, the tool boundary is sufficient. For generative tools, both layers work together. See the [Tool Expressiveness Spectrum](tool.md) for the full analysis.
+
+---
+
 ## Two Modes: Observe and Control
 
 The same middleware infrastructure serves two distinct purposes depending on what the callback returns:
