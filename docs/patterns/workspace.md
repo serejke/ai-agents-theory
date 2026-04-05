@@ -1,21 +1,18 @@
-# Workspace — Where Agents Operate
+# Workspace
 
-## The Problem
+A Workspace is a structured, persistent data space where agents read input, write intermediate artifacts, produce output, and collaborate with other agents and humans. It is the answer to "where does the agent work?" — a question that individual primitives don't address.
 
-An agent needs somewhere to work. Not just tools to call and memory to recall — a **place** where it reads input, writes intermediate artifacts, produces output, and collaborates with other agents and humans. Current theory has Channel (ephemeral data passing between agents within a run) and Memory (persistent knowledge across sessions), but neither captures the structured, shared, persistent data environment that every real agent system ends up building.
+**Composition**: [Tool](../primitives/tool.md) (filesystem operations) + [Channel](../primitives/channel.md) (shared directories between agents) + [ContextProvider](context.md) (hierarchy as navigable context). Optional: permissions, versioning, collaboration.
 
-Claude Code operates on a local filesystem. Devin gets a workspace with files and a shell. Enterprise agents need access to company documents with permissions and versioning. Coding agents navigate repository trees. Research agents write notes to directories that other agents read. In every case, the agent's effectiveness depends on the **structure and semantics of the data space it inhabits**.
+## Why It Matters
 
-This document formalizes that data space as a first-class concept.
+An agent needs somewhere to work — not just tools to call and memory to recall, but a **place** where it reads context, writes artifacts, and collaborates. [Channel](../primitives/channel.md) answers "how does agent A's output reach agent B?" [Memory](../primitives/memory.md) answers "what does the agent know from past sessions?" Workspace answers **"where does the agent read, think, and write?"**
 
-Related: [Agent Primitives](agent-primitives.md), [Channel](channel.md), [Memory](memory.md), [App Inversion](app-inversion.md)
+Claude Code operates on a local filesystem. Devin gets a workspace with files and a shell. Enterprise agents need access to company documents with permissions and versioning. Coding agents navigate repository trees. Research agents write notes to directories that other agents read. In every case, the agent's effectiveness depends on the structure and semantics of the data space it inhabits.
 
----
-
-## Workspace as a Pattern
+## Formal Definition
 
 ```typescript
-// Workspace — structured, persistent data space where agents operate
 type Workspace = {
   read: (path: string) => Content;
   write: (path: string, content: Content) => void;
@@ -29,13 +26,9 @@ type Workspace = {
 };
 ```
 
-Workspace is a **pattern** — a composition of Tool (filesystem operations), Channel (inter-agent data passing via shared directories), and ContextProvider (directory hierarchy as navigable context). It emerges independently in every agent system because agents need a structured place to do work, not just functions to call.
-
 ---
 
 ## What Makes Workspace Distinct
-
-Workspace occupies a gap that neither Channel nor Memory fills:
 
 | Property     | Channel                           | Memory                   | **Workspace**                                     |
 | ------------ | --------------------------------- | ------------------------ | ------------------------------------------------- |
@@ -46,10 +39,6 @@ Workspace occupies a gap that neither Channel nor Memory fills:
 | Versioning   | None                              | None or manual           | **Automatic** (every write is tracked)            |
 | Content type | Intermediate results              | Extracted knowledge      | **Artifacts** (documents, analyses, drafts, data) |
 | Primary use  | Pass data between pipeline stages | Remember across sessions | **Do work** — read context, produce output        |
-
-Channel answers: "how does agent A's output reach agent B?"
-Memory answers: "what does the agent know from past sessions?"
-Workspace answers: "where does the agent read, think, and write?"
 
 ---
 
@@ -66,16 +55,7 @@ Every major agent system converges on filesystem semantics for the workspace int
 | GitHub Copilot Workspace               | Virtual repository checkout             |
 | Enterprise platforms (Box, SharePoint) | Virtual filesystem over managed storage |
 
-The interface is always the same four operations:
-
-```typescript
-read(path); // get content at a location
-write(path); // create or update content
-list(path); // see what's in a directory
-search(query); // find content by criteria
-```
-
-This convergence isn't accidental. It follows from a property of the underlying model.
+The interface is always the same four operations: `read`, `write`, `list`, `search`. This convergence isn't accidental — it follows from a property of the underlying model.
 
 ---
 
@@ -93,7 +73,7 @@ Filesystem operations have maximum cognitive affinity because:
 
 4. **Human alignment.** Humans already organize information in hierarchies. The filesystem metaphor matches how people think about document organization, which means the agent's navigation mirrors human expectations.
 
-This has a practical design implication: when building tools for agents, **translate complex domain interfaces into filesystem-like metaphors** where possible. An enterprise storage API with folder IDs, metadata endpoints, and permission queries becomes:
+This has a practical design implication: **when building tools for agents, translate complex domain interfaces into filesystem-like metaphors** where possible. An enterprise storage API with folder IDs, metadata endpoints, and permission queries becomes:
 
 ```
 Complex API:                          Filesystem facade:
@@ -102,24 +82,13 @@ GET /files/:id/content          →     read("/contracts/vendors/acme.pdf")
 POST /files + POST /metadata    →     write("/analysis/acme_risks.md")
 ```
 
-The agent doesn't need to understand the enterprise API. It understands files and directories. The translation layer handles the rest. This is the [Tool boundary](app-inversion.md) from App Inversion — but implemented specifically as a **cognitive facade**: an interface designed not for human developers but for LLM reasoning.
+The agent doesn't need to understand the enterprise API. It understands files and directories. The translation layer handles the rest. This is the [Tool boundary](../primitives/tool.md) — but implemented specifically as a **cognitive facade**: an interface designed not for human developers but for LLM reasoning.
 
 ---
 
 ## Structural Navigation — Hierarchy as Retrieval
 
-Agent systems typically retrieve context through search:
-
-```typescript
-// From Memory primitive — existing retrieval strategies
-type RetrievalStrategy =
-  | "always_load" // load everything (CLAUDE.md)
-  | "keyword_search" // grep over content
-  | "semantic_search" // embeddings + vector similarity (RAG)
-  | "llm_curated"; // LLM decides what's relevant
-```
-
-Workspace enables a fifth strategy: **structural navigation** — the agent traverses a hierarchy to find relevant context.
+Agent systems typically retrieve context through search (see [Memory retrieval strategies](../primitives/memory.md)). Workspace enables an additional strategy: **structural navigation** — the agent traverses a hierarchy to find relevant context.
 
 ```typescript
 // The agent navigates the tree, using directory names as semantic cues
@@ -152,7 +121,7 @@ The two strategies complement each other. Semantic search excels at cross-cuttin
 
 ---
 
-## Permission Models — Where Access Control Lives
+## Permission Models
 
 Agent systems need access control. The question is where to enforce it. Two architecturally distinct approaches:
 
@@ -161,7 +130,7 @@ Agent systems need access control. The question is where to enforce it. Two arch
 Permissions enforced at the orchestration layer, wrapping tool execution:
 
 ```typescript
-// From Guardrails primitive
+// From the Guardrail primitive
 const noFinanceAccess: Guardrail = {
   pre: (action) => {
     if (action.params.path?.startsWith("/finance/"))
@@ -178,10 +147,9 @@ The agent sees the full workspace structure but gets blocked when it tries to ac
 Permissions enforced by the workspace itself, based on the identity of the caller:
 
 ```typescript
-// Workspace with built-in permissions
 const managedWorkspace: Workspace = {
   read: (path) => {
-    const identity = getCurrentIdentity(); // user or agent identity
+    const identity = getCurrentIdentity();
     if (!acl.canRead(identity, path)) throw new AccessDenied(path);
     return storage.read(path);
   },
@@ -202,7 +170,7 @@ The agent never sees files it can't access — they're invisible in `list()` res
 | Enterprise agent on shared data | Data-level permissions | Must respect existing ACLs; can't re-implement org policies per agent                   |
 | Multi-tenant agent platform     | Both                   | Data-level for tenant isolation; agent-level for per-agent restrictions within a tenant |
 
-The enterprise case reveals why permission-aware workspaces matter: an organization with 10,000 employees and complex access policies can't re-encode those policies as agent guardrails. The workspace inherits them from the data layer. The agent is just another identity in the permission system — like a new employee who gets access based on their role, not a custom access list.
+The enterprise case reveals why permission-aware workspaces matter: an organization with 10,000 employees and complex access policies can't re-encode those policies as agent [Guardrails](../primitives/guardrail.md). The workspace inherits them from the data layer. The agent is just another identity in the permission system — like a new employee who gets access based on their role, not a custom access list.
 
 ---
 
@@ -218,7 +186,6 @@ const localWorkspace: Workspace = {
   write: (path, content) => fs.writeFile(path, content),
   list: (path) => fs.readdir(path),
   search: (query) => grep(query, "."),
-  // No permissions (OS-level only), no versioning
 };
 ```
 
@@ -257,13 +224,10 @@ Isolated environment (container, VM, cloud instance) with a fresh filesystem per
 
 ```typescript
 const sandboxedWorkspace: Workspace = {
-  // Filesystem inside a container
   read: (path) => container.exec(`cat ${path}`),
   write: (path, content) => container.writeFile(path, content),
   list: (path) => container.exec(`ls ${path}`),
   search: (query) => container.exec(`grep -r "${query}" .`),
-  // Isolation: each task gets a fresh container
-  // Cleanup: container destroyed after task completes
 };
 ```
 
@@ -317,39 +281,6 @@ In enterprise settings, agent-written artifacts appear in the same team folders 
 
 ---
 
-## How Workspace Fits the Primitives Map
-
-```
-LLM ────────────────── stateless: (system, messages) -> stream
-  |
-  +-- Tool ──────────── side effect: (params) -> result
-  |
-  +-- Memory ────────── persistent read+write across sessions
-  |
-  +-- Channel ───────── intermediate results between agents within a run
-  |    +-- filesystem, return value, artifact, shared state, mailbox, git
-  |
-  +-- Guardrail ─────── hard constraint, not controlled by LLM
-  +-- StateMachine ──── phases + transitions + human checkpoints
-  |
-  +-- Workspace ─────── (pattern) structured data space where agents operate
-       = Tool (filesystem ops)
-       + Channel (shared directories between agents)
-       + ContextProvider (hierarchy as navigable context)
-       + optional: Permissions, Versioning, Collaboration
-
-       Variants: local filesystem, git-backed, sandboxed, virtual/managed
-```
-
-Workspace is a **pattern**, not a primitive — it composes Tool, Channel, and ContextProvider. But it's a pattern important enough to name because:
-
-- Every real agent system builds one
-- Its properties (hierarchy, permissions, versioning, collaboration) emerge from the composition but aren't present in any individual primitive
-- The filesystem convergence across all agent systems suggests it's a natural attractor in the design space
-- It resolves the "where does the agent work?" question that primitives alone don't answer
-
----
-
 ## Design Implications
 
 **For agent builders**: Your agent needs a workspace, not just tools. Even if it's "just" a local filesystem, recognize it as the workspace and design accordingly — directory structure encodes context, naming conventions matter, workspace layout is part of the agent's cognitive environment.
@@ -358,4 +289,12 @@ Workspace is a **pattern**, not a primitive — it composes Tool, Channel, and C
 
 **For tool designers**: When building tools that expose data to agents, consider a filesystem facade over your domain. Complex APIs with IDs, nested resources, and pagination become `list` + `read` + `write` + `search` over a virtual directory tree. The translation costs you engineering effort once; it saves the LLM cognitive effort on every interaction.
 
-**For the theory**: Workspace connects App Inversion to agent primitives concretely. The [Tool boundary](app-inversion.md) in App Inversion is where the agent world meets regular software. Workspace is the agent-side surface of that boundary — the structured space through which agents interact with everything below.
+---
+
+## Related
+
+- [Tool](../primitives/tool.md) — workspace operations are tools; workspace is a structured composition of them
+- [Channel](../primitives/channel.md) — shared directories within a workspace serve as channels between agents
+- [ContextProvider](context.md) — directory hierarchy is a navigable context source
+- [Guardrail](../primitives/guardrail.md) — agent-level permission enforcement within a workspace
+- [App Inversion](../app-inversion/architecture.md) — workspace is the agent-side surface of the tool boundary

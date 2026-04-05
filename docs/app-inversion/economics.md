@@ -1,21 +1,12 @@
-# App Inversion: The Economics of Agent Capabilities
+# App Inversion — Economics
 
-## The Core Thesis
+When apps become agent-callable capabilities, the entire economic structure around software changes: how capabilities are discovered, priced, paid for, and competed over. The agent becomes the new distribution layer — the new browser, the new home screen.
 
-Apps as we know them — standalone products with their own UI, auth, onboarding, and data stores — get _inverted_. Their value gets extracted into capabilities that agents call on behalf of users. The UI layer becomes irrelevant. Business logic and domain knowledge become API services consumed by agents.
+For the architectural analysis of _how_ apps decompose, see [App Inversion: Architecture](architecture.md). This document covers what happens to markets, pricing, distribution, and defensibility.
 
-The value chain shifts:
+---
 
-```
-Today:  User → App UI → Business Logic → Data
-Future: User → Agent → Capability API → Business Logic → Data
-```
-
-The agent becomes the new distribution layer, the new browser, the new home screen.
-
-For the architectural analysis of _how_ apps decompose (which layers invert, which stay traditional), see [App Inversion](app-inversion.md). This document focuses on the _economics_ — what happens to markets, pricing, distribution, and defensibility when apps become agent capabilities.
-
-## What's Happening Today (2025-2026)
+## What's Happening Today
 
 ### Protocol Layer
 
@@ -25,8 +16,8 @@ For the architectural analysis of _how_ apps decompose (which layers invert, whi
 
 ### Early Marketplace Signals
 
-- **[GPT Store — Apps in Agent Clothing](app-inversion-economics-gpt-store.md)** — OpenAI's first attempt at a capability marketplace. Failed because it replicated the app model inside an agent interface rather than enabling true composable capabilities.
-- **[MCP Registries and the Automation Pivot](app-inversion-economics-mcp-registries.md)** — MCP server registries emerging alongside Zapier, Make, n8n repositioning from standalone automation into agent tool providers.
+- **[GPT Store](case-gpt-store.md)** — OpenAI's first attempt at a capability marketplace. Failed because it replicated the app model inside an agent interface rather than enabling true composable capabilities.
+- **[MCP Registries](case-mcp-registries.md)** — MCP server registries emerging alongside Zapier, Make, n8n repositioning from standalone automation into agent tool providers.
 - Stripe, Twilio — the API economy was the precursor. Those APIs are developer-facing; agent capabilities are agent-facing, which means adoption can be dramatically faster.
 
 ### What's Not Happening Yet
@@ -36,18 +27,20 @@ For the architectural analysis of _how_ apps decompose (which layers invert, whi
 - No real marketplace with price competition.
 - Most "agent tools" are still thin wrappers around existing APIs, not purpose-built for agent consumption.
 
-## Near-Term Future (2026-2028)
+---
+
+## Near-Term Future
 
 ### Discovery Mechanics
 
-How does an agent know which capability to use? This is the critical unsolved problem. Several models will coexist:
+How does an agent know which capability to use? Several models will coexist:
 
 1. **User-configured** — the user tells their agent which services to use, like installing browser extensions today. Most control, least convenience. This is where we are now (MCP config files).
 2. **Platform-curated** — Anthropic, OpenAI, Google curate approved capabilities in a registry. Quality-controlled but gatekept. App Store model.
 3. **Open registry** — like npm/PyPI for agent capabilities. Anyone publishes, reputation and ratings emerge organically. Discovery via metadata, reviews, usage stats.
 4. **Agent-discovered** — agents autonomously find, evaluate, and select capabilities. Most powerful, furthest out. Requires trust frameworks.
 
-**Prediction:** We'll see (1) → (2) → (3) in that order. (4) requires solving trust, which is a harder problem.
+**Prediction:** (1) → (2) → (3) in that order. (4) requires solving trust, which is a harder problem.
 
 ### Pricing Mechanisms
 
@@ -65,11 +58,11 @@ Traditional SaaS pricing (per-seat, monthly) breaks down when the "user" is an a
 
 ### Payment Mechanisms
 
-This is a genuinely novel problem. If an agent autonomously calls services on your behalf throughout the day, how does money flow?
+If an agent autonomously calls services on your behalf throughout the day, how does money flow?
 
 1. **Pre-authorized budgets** — user sets spending limits per category or per capability. "Spend up to €5/month on travel tools, up to €20 on legal services." The agent operates within these bounds.
 
-2. **Platform intermediation** — the agent platform (Anthropic, OpenAI) handles billing aggregation, like Apple handles App Store payments. You get one bill. The platform takes a cut (15-30%). This is the most likely near-term model because it solves trust on both sides.
+2. **Platform intermediation** — the agent platform (Anthropic, OpenAI) handles billing aggregation, like Apple handles App Store payments. You get one bill. The platform takes a cut (15-30%). The most likely near-term model because it solves trust on both sides.
 
 3. **Agent wallets** — agents get their own payment credentials with programmatic spending limits. Could be traditional (virtual credit cards) or crypto (stablecoin wallets with smart contract limits).
 
@@ -77,11 +70,13 @@ This is a genuinely novel problem. If an agent autonomously calls services on yo
 
 5. **Credit/reputation systems** — instead of paying per-call, agents build reputation scores. High-reputation agents get credit terms. Capability providers accept deferred payment from trusted agents.
 
-**Prediction:** Platform intermediation wins first (path of least resistance). Micropayment rails emerge later for high-frequency, low-value calls, likely stablecoin-based.
+**Prediction:** Platform intermediation wins first (path of least resistance). Micropayment rails emerge later for high-frequency, low-value calls.
 
-## Long-Term Future (2028+)
+---
 
-### Market Dynamics
+## Long-Term Dynamics
+
+### Market Structure
 
 **Aggregation theory applies with full force.** The agent platform that controls the user relationship aggregates demand and has leverage over capability providers. This is Google vs. websites, Apple vs. app developers, all over again:
 
@@ -119,10 +114,12 @@ In a world of commoditized capabilities, these moats survive:
 - **Platform concentration** — are we creating new gatekeepers? If Anthropic/OpenAI control which capabilities agents prefer, they wield enormous power over the capability ecosystem.
 - **Liability** — when an agent uses a capability that causes harm (bad legal advice, wrong flight booked, failed complaint), who is liable? The user? The agent platform? The capability provider? This will require new legal frameworks.
 - **Security and trust** — agents calling arbitrary APIs with user data (emails, financial info, personal documents) is a massive attack surface. Capability providers need certification, sandboxing, audit trails.
-- **Race to the bottom** — if margins compress to near-zero, who funds innovation in capabilities? We might see the same dynamics as mobile apps — a few winners, a vast graveyard.
+- **Race to the bottom** — if margins compress to near-zero, who funds innovation in capabilities? Same dynamics as mobile apps — a few winners, a vast graveyard.
 - **Agent collusion and bias** — if agents learn to prefer certain capability providers (via training data, partnerships, or economic incentives), it creates invisible lock-in worse than today's platform lock-in.
 
-## Analogies and Historical Parallels
+---
+
+## Historical Parallels
 
 | Era           | Distribution Layer  | Providers                | Margin Capture                     |
 | ------------- | ------------------- | ------------------------ | ---------------------------------- |
@@ -134,6 +131,8 @@ In a world of commoditized capabilities, these moats survive:
 
 The pattern is consistent: the distribution layer captures the most value. The question is only what percentage.
 
+---
+
 ## Implications for Builders
 
 If you're building a capability (not a platform):
@@ -144,3 +143,12 @@ If you're building a capability (not a platform):
 4. **Success-based pricing where possible.** It aligns incentives and is harder to commoditize than per-call pricing.
 5. **Build regulatory moats.** Get licensed, get certified, get compliance credentials. These are the hardest moats to replicate.
 6. **Prepare for zero-UI.** Your "product" is a function signature, a reliability SLA, and a performance track record. Invest in observability and metrics, not design systems.
+
+---
+
+## Related
+
+- [Architecture](architecture.md) — the structural analysis of which layers invert and which stay
+- [GPT Store case study](case-gpt-store.md) — what went wrong with the first capability marketplace attempt
+- [MCP Registries case study](case-mcp-registries.md) — how MCP registries and automation platforms are converging
+- [Tool](../primitives/tool.md) — the architectural boundary that enables the economics described here

@@ -1,6 +1,6 @@
-# GPT Store — Apps in Agent Clothing
+# Case Study: GPT Store — Apps in Agent Clothing
 
-Parent: [App Inversion: Economics](app-inversion-economics.md)
+The GPT Store is a case study in applying the wrong model to agent capabilities. It failed not because the timing was wrong, but because it replicated the app model inside an agent interface — exactly what [App Inversion](architecture.md) predicts will fail.
 
 ---
 
@@ -8,13 +8,9 @@ Parent: [App Inversion: Economics](app-inversion-economics.md)
 
 OpenAI launched the GPT Store in January 2024 as "build custom GPTs and share them." The pitch: anyone can create a specialized AI assistant, publish it, and eventually monetize it. The App Store for AI.
 
-It didn't work. Not because the timing was wrong, but because the **model was wrong.**
+It didn't work.
 
-## The Fundamental Error
-
-The GPT Store replicated the app model inside an agent interface. Instead of one agent with many composable capabilities, it offered many single-purpose agents with no composability.
-
-Each custom GPT was a mini-app — its own persona, instructions, and uploaded knowledge files. You'd browse a store, pick "Resume Writer GPT" or "SEO Analyzer GPT," and use it in isolation. This is the exact pattern [App Inversion](app-inversion.md) predicts will fail.
+---
 
 ## Five Structural Problems
 
@@ -22,7 +18,7 @@ Each custom GPT was a mini-app — its own persona, instructions, and uploaded k
 
 You couldn't tell ChatGPT "use the Resume Writer AND the Job Search GPT together to tailor my application." Each GPT was a silo.
 
-In a true capability model, these would be tools that one agent orchestrates together. The user says "help me apply for this job" and the agent calls a resume-formatting capability, a job-requirements-analysis capability, and a cover-letter capability — all in one conversation, composing their outputs.
+In a true capability model, these would be [Tools](../primitives/tool.md) that one agent orchestrates together. The user says "help me apply for this job" and the agent calls a resume-formatting capability, a job-requirements-analysis capability, and a cover-letter capability — all in one conversation, composing their outputs.
 
 The GPT Store forced the user to be the orchestrator — manually switching between GPTs, copy-pasting context. This is worse than the app model, because at least apps can share data via APIs.
 
@@ -42,23 +38,25 @@ A "Legal Advisor GPT" that's just a prompt saying "you are a legal expert" adds 
 
 GPTs couldn't call each other, share context, or compose into workflows.
 
-Compare this to MCP tools, where an agent can call a flight-lookup tool, then a complaint-filing tool, then an email-drafting tool — all in one conversation, with context flowing between them. The protocol enables composition; the GPT Store actively prevented it.
+Compare this to MCP tools, where an agent can call a flight-lookup tool, then a complaint-filing tool, then an email-drafting tool — all in one conversation, with context flowing between them via [Channels](../primitives/channel.md). The protocol enables composition; the GPT Store actively prevented it.
 
 ### 5. Wrong Economic Unit
 
 The GPT Store tried to monetize whole "apps" (subscriptions, revenue sharing per GPT). But the natural economic unit in an agent world is the **capability invocation**, not the **agent instance**.
 
-Nobody pays \$5/month for "Resume Writer GPT" when they write a resume twice a year. But they'd happily pay \$0.50 per resume formatted, or \$2 per job application optimized. Usage-based pricing aligns with how agents consume capabilities — sporadically, in bursts, composed with other capabilities.
+Nobody pays $5/month for "Resume Writer GPT" when they write a resume twice a year. But they'd happily pay $0.50 per resume formatted, or $2 per job application optimized. Usage-based pricing aligns with how agents consume capabilities — sporadically, in bursts, composed with other capabilities.
+
+---
 
 ## The Result
 
 The store filled with thousands of thin wrappers barely distinguishable from a good prompt. Users had no reason to leave the main ChatGPT interface for a slightly customized version of it. Creators had no way to build real defensibility. Revenue sharing never materialized meaningfully.
 
+---
+
 ## The Lesson
 
 The GPT Store failed because it answered the wrong question. It asked: _"How do we let people build and sell custom AI assistants?"_ The right question is: _"How do we let agents discover and compose external capabilities on behalf of users?"_
-
-The difference:
 
 | GPT Store (wrong model)     | Capability marketplace (right model)               |
 | --------------------------- | -------------------------------------------------- |
@@ -68,10 +66,12 @@ The difference:
 | Monetize the agent instance | Monetize the capability invocation                 |
 | Human evaluates quality     | Agent evaluates metrics (latency, accuracy, price) |
 
-## What's Emerging Instead
-
-The contrast with MCP and emerging tool registries is stark. These are about exposing **functions with real backends** that any agent can call and compose — not about packaging prompts as pseudo-products.
-
 The GPT Store was Web 1.0 portal thinking applied to the agent era. What's needed is the equivalent of the open web — composable, discoverable, interoperable services that agents navigate on the user's behalf.
 
-See also: [MCP Registries and the Automation Pivot](app-inversion-economics-mcp-registries.md)
+---
+
+## Related
+
+- [Architecture](architecture.md) — the structural analysis that predicts why the GPT Store model fails
+- [Economics](economics.md) — the economic forces driving capability marketplaces
+- [MCP Registries](case-mcp-registries.md) — what's emerging instead

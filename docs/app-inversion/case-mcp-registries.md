@@ -1,17 +1,6 @@
-# MCP Registries and the Automation Pivot
+# Case Study: MCP Registries and the Automation Pivot
 
-Parent: [App Inversion: Economics](app-inversion-economics.md)
-
----
-
-## Two Converging Movements
-
-Two things are happening simultaneously in the agent capability space, and they're heading toward the same destination from opposite directions:
-
-1. **MCP registries** — bottom-up, developer-driven, protocol-first. New infrastructure being built for agent-native capability discovery.
-2. **Automation platform pivot** — top-down, business-driven. Existing platforms (Zapier, Make, n8n) repositioning their massive integration libraries as agent-callable tools.
-
-Both are early marketplace signals. Neither has won yet. Understanding where each is strong and weak reveals what the actual capability marketplace will look like.
+Two movements in the agent capability space are heading toward the same destination from opposite directions: MCP registries (bottom-up, developer-driven) and automation platform pivots (top-down, business-driven). Understanding where each is strong and weak reveals what the actual capability marketplace will look like.
 
 ---
 
@@ -19,9 +8,9 @@ Both are early marketplace signals. Neither has won yet. Understanding where eac
 
 ### What They Are
 
-MCP (Model Context Protocol) server registries are directories of tools that agents can discover and call. Think npm, but for agent capabilities instead of JavaScript packages. A developer publishes an MCP server (e.g., "query EU consumer protection law"), registers it with metadata (description, input/output schemas, pricing), and any compatible agent can find and use it.
+MCP (Model Context Protocol) server registries are directories of [Tools](../primitives/tool.md) that agents can discover and call. Think npm, but for agent capabilities instead of JavaScript packages. A developer publishes an MCP server (e.g., "query EU consumer protection law"), registers it with metadata (description, input/output schemas, pricing), and any compatible agent can find and use it.
 
-### Current State (2026)
+### Current State
 
 - **Several registries exist** — mcp.so, Smithery, Glama, and others index hundreds of community MCP servers. Anthropic maintains a reference list. No single dominant registry yet.
 - **Entirely developer-oriented** — installing an MCP server means editing JSON config files, running local processes, managing dependencies. No non-developer has ever done this.
@@ -76,7 +65,7 @@ All three are repositioning from "automation platform you build workflows in" to
 
 ### Why This Is Strategically Smart
 
-The automation platforms realized something crucial: **their UI is the part that gets inverted, but their integration layer is the part that persists.**
+The automation platforms realized something crucial: **their UI is the part that gets inverted, but their integration layer is the part that persists.** This is a textbook [App Inversion](architecture.md) play.
 
 ```
 Traditional Zapier:  User → Zapier UI → Trigger → Action → Service
@@ -84,8 +73,6 @@ Agent Zapier:        User → Agent → Zapier Tool → Action → Service
 ```
 
 The "Zapier UI" layer (visual workflow builder, trigger configuration, testing interface) is exactly what agents replace. But the "Action → Service" layer (authenticated API calls to 7,000 services) is exactly what agents need and can't easily replicate.
-
-This is a textbook [App Inversion](app-inversion.md) play: shed the UI, expose the service layer as capabilities.
 
 ### Why This Is Also Risky
 
@@ -97,9 +84,9 @@ This is a textbook [App Inversion](app-inversion.md) play: shed the UI, expose t
 
 4. **Lock-in reversal.** Zapier's lock-in comes from workflows — complex automations that are painful to rebuild elsewhere. Capabilities don't have this lock-in. If an agent can call Zapier's Gmail tool or Google's native Gmail MCP server, switching cost is zero.
 
-### The Zapier Survival Path
+### The Survival Path
 
-Zapier survives if it becomes the **reliability and trust layer** rather than the integration layer:
+Zapier-like platforms survive if they become the **reliability and trust layer** rather than the integration layer:
 
 - **Guaranteed uptime and SLAs** — "call Gmail through us, and we guarantee 99.9% reliability with automatic retry and fallback." Raw API access doesn't offer this.
 - **Compliance and audit** — "every action your agent takes through us is logged, auditable, and reversible." Enterprise requirement that raw tools can't satisfy.
@@ -110,7 +97,7 @@ Zapier survives if it becomes the **reliability and trust layer** rather than th
 
 ## Where They Converge
 
-MCP registries and automation platforms are approaching the same destination — a marketplace of agent-callable capabilities — from opposite directions:
+MCP registries and automation platforms are approaching the same destination from opposite directions:
 
 |                | MCP Registries                                    | Automation Platforms                                       |
 | -------------- | ------------------------------------------------- | ---------------------------------------------------------- |
@@ -125,9 +112,9 @@ MCP registries and automation platforms are approaching the same destination —
 
 Neither wins alone. The capability marketplace that emerges will have **layers**:
 
-1. **Protocol layer (MCP)** — the universal interface. Every capability speaks MCP (or whatever protocol wins). This is commodity infrastructure, like HTTP.
+1. **Protocol layer (MCP)** — the universal interface. Every capability speaks MCP (or whatever protocol wins). Commodity infrastructure, like HTTP.
 2. **Registry layer** — discovery and metadata. Multiple registries coexist, some open (npm-like), some curated (App Store-like), some platform-specific.
-3. **Trust layer** — quality signals, reliability metrics, security certification. This is where Zapier-like companies can reposition. "We've vetted this capability, we monitor its uptime, we guarantee its behavior."
+3. **Trust layer** — quality signals, reliability metrics, security certification. This is where Zapier-like companies can reposition.
 4. **Payment layer** — usage metering, billing aggregation, revenue sharing. Likely owned by agent platforms (Anthropic, OpenAI) initially, then potentially decentralized.
 5. **Capability layer** — the actual services. Mix of direct-from-source (Google's own Gmail tool), middleware (Zapier-wrapped integrations), and independent providers (specialized domain services).
 
@@ -148,4 +135,10 @@ The winning play in agent capabilities might be similar: not building a marketpl
 - **Who owns the trust layer?** This might be the most valuable piece — the entity that certifies capabilities as safe, reliable, and compliant. Could be agent platforms, could be independent (like certificate authorities for HTTPS), could be regulatory.
 - **When do capabilities start competing on price?** Today everything is free or bundled into subscriptions. The moment capabilities become individually priced and agent-discoverable, price competition begins and margins collapse. This is the moment the market truly forms.
 
-See also: [GPT Store — Apps in Agent Clothing](app-inversion-economics-gpt-store.md)
+---
+
+## Related
+
+- [Architecture](architecture.md) — why the integration layer persists while the UI layer inverts
+- [Economics](economics.md) — the market dynamics driving this convergence
+- [GPT Store](case-gpt-store.md) — the first failed attempt at a capability marketplace

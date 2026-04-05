@@ -1,16 +1,12 @@
-# App Inversion — How Applications Decompose in the Agent World
+# App Inversion — Architecture
 
-## The Problem
+App Inversion is the structural shift in which traditional applications decompose into agent-callable capabilities. The app stops being the unit of delivery — the agent becomes the unit, and use cases become tool configurations plugged into a universal architecture.
 
-You build an app: backend, database, frontend, deployment pipeline. Six months later the UX layer is obsolete — users interact through agents, not dashboards. Another team wraps your API in a Tool definition and your carefully crafted UI becomes irrelevant. You've seen this cycle before with mobile-first killing desktop UIs, but this time it's faster and more fundamental.
+## Why It Matters
+
+You build an app: backend, database, frontend, deployment pipeline. The UX layer becomes obsolete — users interact through agents, not dashboards. Another team wraps your API in a [Tool](../primitives/tool.md) definition and your carefully crafted UI becomes irrelevant. This cycle is faster and more fundamental than previous platform shifts (mobile-first, web-first).
 
 The question isn't _whether_ apps will decompose into agent-callable pieces. The question is: **which parts of your system survive, which get replaced, and how do you architect for this from day one?**
-
-This document gives you a mental model for that. It decomposes the traditional app into layers, shows which ones invert in the agent world and which stay exactly as they are, and identifies the architectural boundary (the Tool interface) that separates agent-native code from regular software engineering.
-
-**Who this is for:** Engineers building software today who want to understand where the architecture is heading — not to chase hype, but to stop building systems that become legacy in one month.
-
-Related: [Agent Primitives](agent-primitives.md), [Agent Patterns](agent-patterns.md), [Memory](memory.md)
 
 ---
 
@@ -37,7 +33,7 @@ Traditional:  Use case → App → (UI + Logic + Data + Integrations)
 Agent world:  Use case → Tool[] + Memory injected into Agent
 ```
 
-The agent becomes the unit. Use cases become **tool configurations** — different sets of Tools and Memory plugged into the same agent architecture. The user states intent; the agent reasons, routes, and acts.
+The agent becomes the unit. Use cases become **tool configurations** — different sets of [Tools](../primitives/tool.md) and [Memory](../primitives/memory.md) plugged into the same agent architecture. The user states intent; the agent reasons, routes, and acts.
 
 ```typescript
 // Traditional: each use case is a separate application
@@ -62,13 +58,13 @@ const personalAgent: AgentDeployment = {
 
 Three things invert simultaneously:
 
-| Aspect           | Traditional App                                                      | Agent                                                                                                                                                                                          |
-| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Interface**    | Each app builds its own UI. User learns N interfaces for N use cases | Agent handles intent and reasoning conversationally. Rich UI (dashboards, charts, guided forms) persists where the modality itself carries value — agent and UI become peers, not replacements |
-| **Logic**        | Business rules hardcoded. Each new feature = new code                | Reasoning is general-purpose. Each new feature = new tool or updated system prompt                                                                                                             |
-| **Control flow** | App dictates the workflow (screens, forms, navigation steps)         | User states intent, agent decides the workflow                                                                                                                                                 |
+| Aspect           | Traditional App                      | Agent                                                                                           |
+| ---------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| **Interface**    | Each app builds its own UI           | Agent handles intent conversationally; rich UI persists where the modality itself carries value |
+| **Logic**        | Business rules hardcoded per feature | Reasoning is general-purpose; new feature = new tool or updated prompt                          |
+| **Control flow** | App dictates the workflow            | User states intent, agent decides the workflow                                                  |
 
-The Interface inversion is selective. Some UI is a **view** — a data display the agent can narrate equally well (a list of recent expenses, a text summary, a status report). Views invert. But some UI is a **medium** — the modality itself carries irreplaceable value: a 6-month net worth chart communicates a trend in one glance, a guided expense entry form is faster and less error-prone than free-text, a portfolio dashboard with color-coded allocation drift creates spatial understanding no conversation can match. Mediums persist alongside the agent as peers over shared infrastructure.
+The Interface inversion is **selective**. Some UI is a **view** — a data display the agent can narrate equally well (a list of recent expenses, a text summary, a status report). Views invert. But some UI is a **medium** — the modality itself carries irreplaceable value: a 6-month net worth chart communicates a trend in one glance, a guided expense entry form is faster and less error-prone than free-text, a portfolio dashboard with color-coded allocation drift creates spatial understanding no conversation can match. Mediums persist alongside the agent as peers over shared infrastructure.
 
 ---
 
@@ -84,7 +80,7 @@ This inversion maps to two well-known software design principles:
 
 ## Three Layers — What Inverts and What Doesn't
 
-Not everything inverts. Analyzing real systems reveals three distinct layers with different inversion behavior:
+Not everything inverts. Real systems reveal three distinct layers with different inversion behavior:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -122,7 +118,7 @@ This is where App Inversion happens — but selectively. The agent takes over in
 - **Personalization via Memory**: the agent remembers that you prefer electronic music and filters event recommendations accordingly, without you configuring each app separately
 - **Natural routing**: you say "what's happening in the city this weekend?" and the agent queries event sources — you don't pick which app to open, you state what you need
 
-Rich UI persists where the modality carries value: a portfolio dashboard with allocation tiers and trend charts, guided forms for structured data entry, visualizations that compress complex state into a glance. Agent and rich UI are **peers** — both consume the same Service Layer through the same Tool boundary, each better at different things.
+Rich UI persists where the modality carries value: a portfolio dashboard with allocation tiers and trend charts, guided forms for structured data entry, visualizations that compress complex state into a glance. Agent and rich UI are **peers** — both consume the same Service Layer through the same [Tool boundary](../primitives/tool.md), each better at different things.
 
 ### Service Layer (stays)
 
@@ -177,19 +173,11 @@ const triggerAggregate: Tool = {
 // - Rate limiters, retry logic, connection pooling
 ```
 
-The Tool's `execute(params) → result` is the architectural boundary. Everything above it is agent primitives (LLM, Memory, Guardrails). Everything below it is regular software engineering. The agent doesn't know or care what lives behind the Tool interface — and it shouldn't.
-
-```
-Agent primitives:   LLM + Tools + Memory + Guardrails + StateMachine + Channel
-                           ↓
-Tool boundary:      execute(params) → result
-                           ↓
-Everything below:   Regular software (databases, pipelines, APIs, infrastructure)
-```
+The [Tool](../primitives/tool.md)'s `execute(params) → result` is the architectural boundary. Everything above it is agent primitives. Everything below it is regular software engineering. The agent doesn't know or care what lives behind the Tool interface — and it shouldn't.
 
 ### Source Layer (external)
 
-Third-party systems that provide raw data or services. Not under your control. The Service Layer ingests from them; the Agent Layer uses them via Tools. Examples: SaaS APIs (time tracking, project management), market data providers, payment processors, social media feeds.
+Third-party systems that provide raw data or services. Not under your control. The Service Layer ingests from them; the agent uses them via Tools. Examples: SaaS APIs (time tracking, project management), market data providers, payment processors, social media feeds.
 
 ---
 
@@ -231,7 +219,7 @@ const personalAgent = deploy(
 );
 ```
 
-The unified approach uses the LLM as a natural [Router](agent-patterns.md#router--pattern) — the user doesn't pick which agent to address; they state what they need, and the agent routes to the right tools based on intent.
+The unified approach uses the LLM as a natural [Router](../patterns/router.md) — the user doesn't pick which agent to address; they state what they need, and the agent routes to the right tools based on intent.
 
 |                  | Separate agents                         | Unified agent                                                                        |
 | ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -241,7 +229,7 @@ The unified approach uses the LLM as a natural [Router](agent-patterns.md#router
 | **Tool scaling** | Few tools per agent                     | Many tools in one agent — routing may degrade                                        |
 | **Complexity**   | Simple per agent, complex orchestration | Complex single agent, simple orchestration                                           |
 
-The honest answer: this is an open design question. The Service Layer underneath is the same either way — the question is only about how the Interface Layer is organized.
+This is an open design question. The Service Layer underneath is the same either way — the question is only about how the Interface Layer is organized.
 
 ---
 
@@ -251,7 +239,7 @@ Four things converged to make App Inversion viable:
 
 1. **Tool abstraction matured.** MCP and function calling mean "integrating an app" is defining a JSON schema, not building a custom adapter or SDK wrapper. The cost of turning any API into a Tool has collapsed.
 
-2. **LLM routing works.** A single agent can handle multiple unrelated domains without confusion, making unification of previously separate apps viable. The Router pattern emerges naturally from LLM reasoning.
+2. **LLM routing works.** A single agent can handle multiple unrelated domains without confusion, making unification of previously separate apps viable. The [Router](../patterns/router.md) pattern emerges naturally from LLM reasoning.
 
 3. **Memory primitives are emerging.** CLAUDE.md, auto-memory, persistent context across sessions — agents can accumulate personal knowledge over time. This is what makes personalization possible without building a recommendation engine per app.
 
@@ -259,28 +247,24 @@ Four things converged to make App Inversion viable:
 
 ---
 
-## What This Means for What You Build
-
-If apps dissolve into tools, then **app companies become API providers** — whether they intend to or not. Many already are: most SaaS products offer REST APIs that expose full functionality. The custom UI they built is what gets replaced by agent-driven interfaces. Their data, their API, and their business logic survive. Their frontend doesn't.
-
-This isn't hypothetical — it's already happening. MCP servers wrap existing APIs into tool definitions. Function calling schemas map directly to REST endpoints. The "integration" work that used to take weeks (build an adapter, handle auth, parse responses, build UI) now takes minutes (define a tool schema, point it at the API).
-
-The apps that survive are the ones with **irreplaceable Service Layers** — proprietary data, complex data processing, regulatory compliance, real-time infrastructure. The apps that don't survive are the ones whose primary value was a nice UI over a simple API. The UI layer is precisely what agents replace.
-
-### The Practical Takeaway
+## The Practical Takeaway
 
 When you architect a system today, ask yourself:
 
 1. **What's my Service Layer?** — What proprietary data, processing, or infrastructure makes my system valuable regardless of interface? Invest here. This is your moat.
 2. **Is my UI a view or a medium?** — If it's a view over data, the agent will replace it. If the modality itself carries value (charts, spatial layouts, guided forms), keep it — but make it a peer of the agent, consuming the same Tool boundary.
 3. **Where's my Tool boundary?** — Define `execute(params) → result` interfaces early. Everything above the boundary can be consumed by agents, rich UIs, or other services. Everything below is regular engineering.
-4. **Does this computation fit in an interaction?** — If the processing cost (latency, data volume, API calls, LLM passes) fits within a request-response cycle, the agent handles it live. If not, extract it into the Service Layer and give the agent a trigger + a reader.
+4. **Does this computation fit in an interaction?** — If the processing cost fits within a request-response cycle, the agent handles it live. If not, extract it into the Service Layer and give the agent a trigger + a reader.
 5. **Am I building an app or a capability?** — An app bundles UI + logic + data into a monolith. A capability exposes logic + data through a clean interface that any consumer — human UI, agent, another service — can use.
 
 The shift isn't "throw away your backend and use AI." It's: **build the Service Layer properly, expose it through Tool-shaped interfaces, and know which of your interfaces are views (replaceable) vs. mediums (keep them as agent peers).**
 
 ---
 
-## Further Reading
+## Related
 
-This document covers the _architecture_ of App Inversion — which layers decompose and which persist. For the _economics_ — what happens to markets, pricing, distribution, and defensibility when apps become agent capabilities — see [App Inversion: Economics](app-inversion-economics.md).
+- [Tool](../primitives/tool.md) — the architectural boundary between agent primitives and regular software
+- [Memory](../primitives/memory.md) — what enables cross-domain personalization without per-app recommendation engines
+- [Router](../patterns/router.md) — how the agent dispatches across unified tool sets
+- [Workspace](../patterns/workspace.md) — the agent-side surface of the tool boundary
+- [Economics](economics.md) — what happens to markets, pricing, and distribution when apps become capabilities
