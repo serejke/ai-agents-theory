@@ -22,6 +22,7 @@ docs/
 │   ├── router.md                   — Router: dispatch by input
 │   ├── evaluator.md                — Evaluator: LLM-as-judge + feedback loop
 │   ├── workspace.md                — Workspace: structured data space for agents
+│   ├── continuity.md               — Continuity: coherent progress across multiple context windows
 │   └── deployment.md               — Trigger + Session + Output + Environment + Composition
 ├── app-inversion/
 │   ├── architecture.md             — Three-layer model, what inverts and what doesn't

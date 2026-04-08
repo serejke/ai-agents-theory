@@ -36,6 +36,7 @@ A pattern is a composition of primitives that recurs across agent systems. Patte
 | **Router**          | Dispatch by input                            | [Router](patterns/router.md)           |
 | **Evaluator**       | LLM-as-judge + feedback loop                 | [Evaluator](patterns/evaluator.md)     |
 | **Workspace**       | Tool + Channel + ContextProvider             | [Workspace](patterns/workspace.md)     |
+| **Continuity**      | Memory + ContextProvider + Guardrail + Tool  | [Continuity](patterns/continuity.md)   |
 | **Deployment**      | Trigger + Session + Output + Environment     | [Deployment](patterns/deployment.md)   |
 
 ### Infrastructure
@@ -68,6 +69,8 @@ These documents are not numbered chapters. Each is self-contained — you can st
 ## Universality
 
 All primitives and patterns are **universal** — none are specific to any particular tool or framework. Claude Code, Codex, Devin, Gemini CLI, Cursor — different assemblies from the same bricks. The difference is in specific parameter values, not architecture.
+
+This has a strong empirical consequence: the model is not the differentiator. The same frontier model with different tool designs, context strategies, and guardrail configurations produces dramatically different performance on identical tasks. Two agent systems differ not in some holistic, ineffable way, but in specific, enumerable configuration choices across primitives: which tools (capped search vs. raw grep), which memory (ground truth feature list vs. none), which guardrails (linter on edit vs. no feedback), which context strategy (progressive disclosure vs. context dump). The composition is where the value lives. The model is commodity.
 
 Claude Code is one specific assembly:
 

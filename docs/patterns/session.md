@@ -79,4 +79,5 @@ The gap between them is where knowledge is lost. Everything discussed in a sessi
 - [LLM](../primitives/llm.md) — the stateless function whose context window bounds Session history
 - [Memory](../primitives/memory.md) — cross-session persistence; complements Session's within-session history
 - [ContextProvider](context.md) — injects knowledge into the Session's system prompt
+- [Continuity](continuity.md) — the protocol for coherent progress across multiple Sessions
 - [Deployment](deployment.md) — how Sessions are triggered and where their output goes

@@ -122,6 +122,82 @@ This spectrum determines the fundamental trade-off in agent system design: **cap
 
 ---
 
+## Tool Output as Cognitive Architecture
+
+The `execute(params) → ToolResult` interface has two sides. The params side faces the agent's decision — which tool to call and with what arguments. The result side faces the agent's context window — the returned content becomes part of the messages the LLM reasons over for every subsequent step. The params side is well-understood (schema design, cognitive affinity). The result side is equally important and less obvious.
+
+A tool's output is not a log line or an API response for a human developer to scan. It is injected directly into the LLM's finite working memory. Every token in the result competes for attention with the task description, the conversation history, and the results of other tool calls. Irrelevant, verbose, or unbounded output degrades reasoning quality on everything that follows.
+
+This makes tool output formatting a first-class design surface — not an implementation detail hidden below the tool boundary.
+
+### Output Bounding
+
+The highest-leverage output design decision is **bounding**. A search tool that returns 10,000 matching lines has not given the agent more information to work with. It has flooded the agent's working memory with noise that will degrade every subsequent reasoning step until the context is compacted or the session ends.
+
+```typescript
+// Unbounded — context flooding
+const naiveGrep: Tool = {
+  name: "search",
+  execute: (params) => grep(params.pattern, params.path),
+  // Returns all matches. 10,000 lines? All of them.
+};
+
+// Bounded — forces refinement
+const boundedSearch: Tool = {
+  name: "search",
+  execute: (params) => {
+    const matches = grep(params.pattern, params.path);
+    if (matches.length > 50) {
+      return {
+        output: `${matches.length} results — too many. Narrow your search.`,
+      };
+    }
+    return { output: formatMatches(matches) };
+  },
+};
+```
+
+The bounded version transforms a context-flooding failure mode into a refinement loop. The agent cannot proceed by being vague — it must be specific. This pushes the agent toward more deliberate, targeted behavior. The SWE-agent paper demonstrated that this single design decision — capping search results at 50 — was among the highest-leverage changes in the entire system.
+
+### Output Formatting
+
+How results are formatted determines whether the LLM can use them efficiently. Line numbers prepended to file content let the agent reference specific lines in subsequent edit commands without counting. Structured summaries of command output let the agent extract what it needs without parsing raw text. Error messages that include both what went wrong and how to fix it close the feedback loop in one step.
+
+```typescript
+// Raw output — agent must parse and count
+const rawViewer: Tool = {
+  name: "view_file",
+  execute: (params) => readFile(params.path),
+  // Returns file content. Agent must count lines to reference line 47.
+};
+
+// Formatted output — cognitive load removed
+const formattedViewer: Tool = {
+  name: "view_file",
+  execute: (params) => {
+    const lines = readFile(params.path).split("\n");
+    const start = params.offset ?? 0;
+    const chunk = lines.slice(start, start + 100);
+    return { output: chunk.map((l, i) => `${start + i + 1}\t${l}`).join("\n") };
+  },
+  // Line numbers prepended. 100-line window. Agent reads "47\t  const x = ..."
+  // and can immediately reference line 47 in an edit command.
+};
+```
+
+### The Design Principle
+
+**Tool output is part of the agent's cognitive architecture, not an implementation detail.** The tool boundary separates agent primitives from regular software, but the result crosses back into agent territory — it becomes context that the LLM reasons over. Design it accordingly: bounded, formatted for LLM consumption, with information density appropriate to the context window budget.
+
+```
+params side:     agent → tool     (schema design, cognitive affinity)
+result side:     tool → agent     (output bounding, formatting, information density)
+
+Both sides face the LLM. Both are design surfaces.
+```
+
+---
+
 ## Why Specific Tools Exist Alongside Bash
 
 If bash subsumes all specific tools, why does every agent system ship with both `bash` and `file_read`? Why not just bash?

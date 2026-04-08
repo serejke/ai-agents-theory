@@ -192,3 +192,4 @@ The breakthrough is when the loop closes: the agent itself writes to memory afte
 - [ContextProvider](../patterns/context.md) — read-only knowledge injection; Memory extends it with write capability
 - [Session](../patterns/session.md) — within-conversation history; Memory is the cross-session equivalent
 - [Channel](channel.md) — passes data within a run; Memory persists knowledge across runs
+- [Continuity](../patterns/continuity.md) — composes Memory with other primitives for multi-session task progress
