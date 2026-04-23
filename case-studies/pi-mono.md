@@ -10,11 +10,11 @@ pi-mono is worth decomposing through the theory because it is, among the product
 
 The monorepo ships seven packages; three of them constitute the agent framework. The rest (TUI, web-ui, Slack bot, GPU pod manager) are infrastructure.
 
-| Package                         | Role                                                                                                                                                        |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@mariozechner/pi-ai`           | Unified LLM provider layer (15+ providers, one `stream()` API). Maps to the [LLM](../primitives/llm.md) primitive.                                          |
-| `@mariozechner/pi-agent-core`   | Stateful [AgentLoop](../harness/agent-loop.md) with tool execution, event streaming, steering/follow-up queues, and `beforeToolCall`/`afterToolCall` hooks. |
-| `@mariozechner/pi-coding-agent` | The `pi` CLI. [Session](../harness/session.md) + TUI + shared-prefix session-graph + extensions + skills + prompt templates + themes + package manager.     |
+| Package                         | Role                                                                                                                                                                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@mariozechner/pi-ai`           | Unified LLM provider layer (15+ providers, one `stream()` API). Implements the [LLM](../primitives/llm.md) primitive and the [Prompt](../primitives/prompt.md) primitive — a single structured message/tool format that gets serialized per provider protocol underneath. |
+| `@mariozechner/pi-agent-core`   | Stateful [AgentLoop](../harness/agent-loop.md) with tool execution, event streaming, steering/follow-up queues, and `beforeToolCall`/`afterToolCall` hooks (the [Guardrail](../harness/guardrail.md) harness slot).                                                       |
+| `@mariozechner/pi-coding-agent` | The `pi` CLI. [Agent](../harness/agent.md) wrapper (Frontend + [Session](../harness/session.md) + [Environment](../environment/environment.md)) with shared-prefix session-graph, extensions, skills, prompt templates, themes, and package manager.                      |
 
 Collapsed to one line:
 
@@ -35,32 +35,33 @@ Every term after `Session` is a composition surface, not a built-in feature. Thi
 
 ## pi-mono Mapped to the Theory
 
-### LLM — Provider Unification as a Primitive Library
+### LLM and Prompt — Provider Unification as a Library
 
-`pi-ai` is a clean implementation of the [LLM](../primitives/llm.md) primitive as the theory defines it: `(system, messages) → stream` over a unified message and tool-call format, with providers (Anthropic, OpenAI, Google, Azure, Bedrock, Mistral, Groq, Cerebras, xAI, OpenRouter, Vercel AI Gateway, and more) as interchangeable backends. Subscriptions and API keys are both first-class auth modes. Thinking level is a uniform dial across providers that support it (`off | minimal | low | medium | high | xhigh`).
+`pi-ai` implements both the [LLM](../primitives/llm.md) and [Prompt](../primitives/prompt.md) primitives. It exposes a single structured message/tool format — effectively a provider-agnostic Prompt — that gets serialized per provider protocol underneath (Anthropic, OpenAI, Google, Azure, Bedrock, Mistral, Groq, Cerebras, xAI, OpenRouter, Vercel AI Gateway, and more). The LLM call that follows is stateless: `Prompt → text stream`. Subscriptions and API keys are both first-class auth modes. Thinking level is a uniform dial across providers that support it (`off | minimal | low | medium | high | xhigh`).
 
-The theory claims LLM is a stateless function and the model is commodity. pi-ai operationalizes both claims: the same `Agent` binds to any of 15+ providers with no code change, and the agent loop does not know or care which provider it is talking to. This is what "the model is commodity" looks like as a library boundary.
+The theory claims LLM is a stateless function and the model is commodity, and that the Prompt is where provider-specific protocol lives. pi-ai operationalizes all three: the same `Agent` object binds to any of 15+ providers with no code change; the agent loop does not know or care which provider it is talking to; and the per-provider protocol serialization is hidden inside pi-ai's Prompt abstraction. This is what "the model is commodity" looks like as a library boundary — and it only works because the Prompt layer is a real concept that pi-ai can unify across providers.
 
-### AgentLoop — A While Loop with Four Extension Seams
+### AgentLoop — A While Loop with Extension Seams
 
-`pi-agent-core` implements [AgentLoop](../harness/agent-loop.md) as a while loop, not a graph. The core cycle is identical to the theory's ~20-line sketch:
+`pi-agent-core` implements [AgentLoop](../harness/agent-loop.md) as a while loop, not a graph. The core cycle is identical to the theory's sketch:
 
 ```
 while true:
-    stream LLM response (emit deltas)
+    assemble Prompt from (system, messages, tool schemas, inserts)
+    stream LLM response, parse tool calls from output text
     if no tool calls → return
     execute tool calls (parallel by default, sequential if any tool opts in)
-    append tool results to context
+    append tool results to Session history
 ```
 
-The interesting part is the four hook points the loop exposes — each corresponds to a theory concept:
+The interesting part is the hook points the loop exposes — each corresponds to a theory concept boundary:
 
-| Hook                                                             | Concept exposed                                                      |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `transformContext(messages)` before each LLM call                | [PromptLoading](../patterns/prompt-loading.md) transform surface     |
-| `beforeToolCall({ toolCall, args })` → `{ block, reason }`       | [Guardrail](../harness/guardrail.md) (pre-tool policy)               |
-| `afterToolCall({ toolCall, result, isError })` → modified result | Guardrail (post-tool policy) + audit                                 |
-| `convertToLlm(messages)` filter                                  | Message-type projection (custom agent messages invisible to the LLM) |
+| Hook                                                             | Concept exposed                                                                          |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `transformContext(messages)` before each LLM call                | Prompt-assembly seam — where [PromptLoading](../patterns/prompt-loading.md) plugs in     |
+| `beforeToolCall({ toolCall, args })` → `{ block, reason }`       | [Guardrail](../harness/guardrail.md) pre-action hook (structural tool-dispatch boundary) |
+| `afterToolCall({ toolCall, result, isError })` → modified result | Guardrail post-action hook + audit                                                       |
+| `convertToLlm(messages)` filter                                  | Message-type projection (custom agent messages invisible to the LLM)                     |
 
 This is the book's claim — every concept boundary is a seam — rendered as a runtime API. Extensions subscribe to the lifecycle events (`tool_call`, `tool_result`, `context`, `before_provider_request`, `turn_start`, `turn_end`, `agent_start`, `agent_end`, `message_start`, `message_update`, `message_end`) and get to intercept at each seam.
 
@@ -81,9 +82,9 @@ The default tool set is four: `read`, `write`, `edit`, `bash`. Optional built-in
 
 This is the theory's [Tool](../primitives/tool.md) primitive in its most unadorned form: tools are side-effectful functions; `bash` is a universal escape hatch; everything domain-specific composes on top. pi's rejection of MCP is consistent: MCP is one transport binding for tools, and if `bash` + markdown skills cover the same ground with lower operational cost, the binding is optional.
 
-### Guardrail — Every Before/After Tool Hook
+### Guardrail — The Tool-Dispatch Boundary
 
-pi has no permission popup. The philosophy section says: "Run in a container, or build your own confirmation flow with extensions." The machinery to build it is exactly the theory's [Guardrail](../harness/guardrail.md) shape — `beforeToolCall({ toolCall, args }) → { block, reason }` is a pre-action guard; `afterToolCall({ toolCall, result }) → modifiedResult` is a post-action guard. The quick-start example literally blocks `rm -rf`:
+pi has no permission popup. The philosophy section says: "Run in a container, or build your own confirmation flow with extensions." But the machinery is always there: `beforeToolCall` and `afterToolCall` fire on every tool invocation. This is exactly the [Guardrail](../harness/guardrail.md) harness as the theory defines it — a structural interception layer at the tool-dispatch boundary, with the policy slot left empty by default. "pi has no guardrails out of the box" means "no policies registered," not "no interception point." The hooks are first-class API in `pi-agent-core`. The quick-start example literally blocks `rm -rf`:
 
 ```typescript
 pi.on("tool_call", async (event, ctx) => {
@@ -94,11 +95,11 @@ pi.on("tool_call", async (event, ctx) => {
 });
 ```
 
-This is a Guardrail. pi does not call it one, but the type signature matches.
+This is a Guardrail policy registered at the dispatch hook. pi does not call it a Guardrail, but the type signature matches — and the hooks are the structural slot, whether or not policies fill them.
 
-### PromptLoading — Three Laziness Tiers
+### PromptLoading — Laziness Tiers
 
-The [PromptLoading](../patterns/prompt-loading.md) pattern shows up in three concrete flavors, each at a different laziness:
+The [PromptLoading](../patterns/prompt-loading.md) pattern shows up in several flavors, each at a different laziness:
 
 | Mechanism                               | Laziness                  | When it fires                                                                                |
 | --------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
@@ -112,15 +113,15 @@ Extensions can also inject into context dynamically via the `context` event or b
 
 ### StateMachine — By Extension, Not By Default
 
-pi has no plan mode. The README is explicit: "Write plans to files, or build it with extensions, or install a package." This is the theory's [StateMachine](../patterns/state-machine.md) primitive handled by the extension substrate — if you want phases with different tool capabilities and transition rules, you write an extension that filters tools based on an extension-owned state variable and persists the state via `pi.appendCustomEntry()`.
+pi has no plan mode. The README is explicit: "Write plans to files, or build it with extensions, or install a package." This is the theory's [StateMachine](../patterns/state-machine.md) pattern handled by the extension substrate — if you want phases with different tool capabilities and transition rules, you write an extension that composes Guardrail policies + a phase variable, filters tools based on state, and persists state via `pi.appendCustomEntry()`.
 
-This is the opposite of LangGraph's approach (where StateMachine is the core abstraction). pi treats StateMachine as a **pattern**, not a primitive of the framework API — consistent with the theory's position that StateMachine is irreducible but rarely needed: most coding agents run a single phase (tool-use loop), and when phases are needed, they are domain-specific enough that a fixed DSL would constrain more than it helps.
+This is the opposite of LangGraph's approach (where StateMachine is the core abstraction). pi treats StateMachine as a composition surface, not as a first-class framework API — consistent with the theory's position that StateMachine is a pattern most coding agents never need. Single-phase tool-use loops cover the default case; when phases are needed, they are domain-specific enough that a fixed DSL would constrain more than it helps.
 
 ### Memory — Compaction Is Session-Local, Not Memory
 
 pi's compaction is lossy summarization of older messages within the active tree path when the context window fills up. The full history stays in the JSONL file; `/tree` can revisit it. Crucially, compaction does not write to a separate [Memory](../patterns/memory.md) store — it is a Session-internal transform that replaces a prefix of messages with a `CompactionEntry` containing a summary.
 
-pi has no cross-session memory primitive beyond `AGENTS.md`. Users are expected to maintain `AGENTS.md` by hand, or build a memory extension. This is conservative — consistent with the book's observation that Memory is the most underdeveloped primitive in the ecosystem. pi does not pretend to solve it; it provides the substrate (custom entries, extensions, compaction hooks) for someone else to build the Memory layer they want.
+pi has no cross-session Memory pattern implementation beyond `AGENTS.md`. Users are expected to maintain `AGENTS.md` by hand, or build a memory extension. This is conservative — the Memory pattern is an area where the ecosystem is thin, and pi does not pretend to solve it. It provides the substrate (custom entries, extensions, compaction hooks) for someone else to build the Memory layer they want.
 
 ### Channel — Single Session, Single Channel (Implicit)
 
@@ -146,9 +147,10 @@ Same Session. Same AgentLoop. Same extensions and skills. The cognitive core is 
 
 pi makes the composition hierarchy explicit as a UX surface:
 
-1. **Primitives and harness** (built into `pi-ai` and `pi-agent-core`): LLM, Tool, AgentLoop, Session, event stream, Guardrail hooks.
-2. **Patterns** (built into `pi-coding-agent`): PromptLoading flavors (AGENTS.md / skills / templates), compaction, session-graph navigation.
-3. **Compositions by user** (extensions, skills, templates, themes, pi-packages): plan mode, sub-agents, MCP bridges, permission popups, git checkpointing, path protection, custom UIs, games during waits.
+1. **Primitives and harness** (built into `pi-ai` and `pi-agent-core`): LLM + Prompt (pi-ai), AgentLoop, Session, Guardrail hooks, event stream.
+2. **Agent wrapping** (built into `pi-coding-agent`): Frontend(s) wrapping the Session and pinning it to an Environment — the interactive TUI, print mode, JSON mode, RPC mode, and SDK Frontends all wrap the same Session.
+3. **Patterns** (built into `pi-coding-agent`): PromptLoading flavors (AGENTS.md / skills / templates), compaction, session-graph navigation (Workspace-shaped over Sessions).
+4. **Compositions by user** (extensions, skills, templates, themes, pi-packages): plan mode (StateMachine pattern), sub-agents (Topology pattern), MCP bridges (Tool adapters), permission popups (Guardrail policies), git checkpointing, path protection, custom UIs, games during waits.
 
 The distribution mechanism — `pi install npm:@foo/pi-tools` or `pi install git:github.com/user/repo` — promotes compositions to shareable units: capabilities, not applications, are the units of distribution. pi packages are to `pi` what browser extensions are to a browser, but with the crucial difference that a pi package can reach _every seam_ — tools, guards, context, commands, UI, provider registration, lifecycle.
 
@@ -170,9 +172,9 @@ Individual [Sessions](../harness/session.md) are linear — that does not change
 
 Most coding agents hide the session-graph — fork is a full copy, sessions are isolated, shared ancestry is invisible. pi makes it the primary UX surface. This is a [Workspace](../patterns/workspace.md) over Sessions, not a change to the Session harness.
 
-### 2. Every Primitive Boundary Should Be a User Hook
+### 2. Every Concept Boundary Should Be a User Hook
 
-pi's extension API is organized around lifecycle events at each concept boundary: `tool_call` (Tool+Guardrail), `tool_result` (Tool+Guardrail), `context` (PromptLoading), `before_provider_request` (LLM), `session_start`/`session_shutdown`/`session_compact` (Session), `resources_discover` (Skill/Template), `model_select` (LLM). This is the [seams](../verification/seams.md) claim — every concept boundary is a seam — turned into an extension contract. If you decide your framework's primitive decomposition, you get the extension API almost for free: one hook per boundary.
+pi's extension API is organized around lifecycle events at each concept boundary: `tool_call` and `tool_result` at the Guardrail/Tool seam, `context` at the Prompt-assembly seam where PromptLoading plugs in, `before_provider_request` at the LLM seam, `session_start`/`session_shutdown`/`session_compact` at the Session seam, `resources_discover` at the Skill/Template seam, `model_select` at the LLM seam. This is the [seams](../verification/seams.md) claim — every concept boundary is a seam — turned into an extension contract. If you decide your framework's concept decomposition, you get the extension API almost for free: one hook per boundary.
 
 ### 3. Progressive Disclosure Beats Preloaded Capability
 
@@ -207,27 +209,27 @@ The same `Agent` object (pi's internal class) powers interactive TUI, print mode
 
 Insights flowing from the book back to pi users.
 
-### 1. Compaction Is a PromptLoading Transform, Not a Memory System
+### 1. Compaction Is a PromptLoading Transform, Not a Memory Write
 
-pi treats compaction as a Session-local operation. It produces no artifact visible to future sessions — it summarizes the current path and discards detail. The theory would classify this precisely: compaction is a [PromptLoading](../patterns/prompt-loading.md) `transformContext` step that trades fidelity for fit within the LLM's context window. It is not a [Memory](../patterns/memory.md) write. Users who want their "compacted learnings" to survive across sessions need a separate Memory mechanism — `AGENTS.md` updates, a custom extension that writes to disk at compaction time, or equivalent. The book clarifies the distinction pi's docs imply but don't state.
+pi treats compaction as a Session-local operation: it summarizes the current path and discards detail, producing no artifact visible to future sessions. The theory classifies this precisely: compaction sits at the Prompt-assembly seam (pi's `transformContext` hook), replacing a prefix of Session.history with a summary before the prefix is snapshotted into Prompt.messages. It is a [PromptLoading](../patterns/prompt-loading.md) transform (dynamic strategy over the Session history source), not a [Memory](../patterns/memory.md) write. Users who want their "compacted learnings" to survive across sessions need a separate Memory mechanism — `AGENTS.md` updates, a custom extension that writes to disk at compaction time, or equivalent. The book clarifies the distinction pi's docs imply but don't state.
 
-### 2. pi Has No Memory Layer; AGENTS.md Is a PromptLoading
+### 2. pi Has No Memory Layer; AGENTS.md Is Eager PromptLoading
 
-pi's "memory" across sessions is `AGENTS.md`, which the user maintains by hand. This is not [Memory](../patterns/memory.md) as the theory defines it — it is an eager [PromptLoading](../patterns/prompt-loading.md) read from disk every turn. The theory's Memory taxonomy — cognitive types (episodic, semantic, procedural), write and retrieval strategies, scopes — gives pi users a framework for building the memory layer pi deliberately left out. Anyone building a pi-memory extension should use the taxonomy as a checklist: which cognitive type is being stored? Who triggers the write? Who triggers the read?
+pi's "memory" across sessions is `AGENTS.md`, which the user maintains by hand. This is not [Memory](../patterns/memory.md) as the theory defines it — it is eager [PromptLoading](../patterns/prompt-loading.md) of a file from disk into the system prompt every turn. The theory's Memory taxonomy — cognitive types (episodic, semantic, procedural), write and retrieval strategies, scopes — gives pi users a framework for building the memory layer pi deliberately left out. Anyone building a pi-memory extension should use the taxonomy as a checklist: which cognitive type is being stored? Who triggers the write? Who triggers the read?
 
 ### 3. Plan Mode, Sub-Agents, and MCP Bridges Are Each a Pattern Composition
 
 pi rejects all three as core features. The theory names what each is:
 
 - **Plan mode** = [StateMachine](../patterns/state-machine.md) with a plan phase and an implement phase, each exposing a different tool set. Extension writes a custom state, filters tools by state, transitions on user command or model signal.
-- **Sub-agents** = spawning a child [Session](../harness/session.md) with a derived system prompt and a return [Channel](../patterns/channel.md) (stdout, file, or shared state) back to the parent.
+- **Sub-agents** = a small [Topology](../patterns/topology.md) — spawning a child [Session](../harness/session.md) with a derived system prompt and a return [Channel](../patterns/channel.md) (stdout, file, or shared state) back to the parent.
 - **MCP bridges** = a [Tool](../primitives/tool.md) adapter that translates MCP server descriptors into pi tool registrations.
 
-None are mysterious. Each is one primitive composition. pi's philosophy says "you can build this"; the theory says _what you would be building_.
+None are mysterious. Each is one pattern composition over pi's harness. pi's philosophy says "you can build this"; the theory says _what you would be building_.
 
 ### 4. Continuity Is a Cross-Session Pattern pi Doesn't Ship
 
-pi ships Sessions (linear, with a shared-prefix session-graph and compaction) but not [Continuity](../patterns/continuity.md). The Continuity pattern composes Memory + PromptLoading (startup sequence) + Guardrail (clean state) + Tool (bootstrap). None of these are pi primitives that ship with a Continuity implementation. A project spanning weeks on pi needs the user to build their own Continuity layer: an `AGENTS.md` that points to a ground-truth JSON, a bootstrap script, a commit-clean guardrail as an extension, and a startup sequence encoded in `AGENTS.md`. pi gives the substrate; the pattern is unwritten.
+pi ships Sessions (linear, with a shared-prefix session-graph and compaction) but not [Continuity](../patterns/continuity.md). The Continuity pattern composes Memory + PromptLoading (startup sequence) + Guardrail (clean state) + Tool (bootstrap). pi ships the primitives and harness that Continuity needs, but no Continuity implementation itself. A project spanning weeks on pi needs the user to build their own Continuity layer: an `AGENTS.md` that points to a ground-truth JSON, a bootstrap script, a commit-clean guardrail policy as an extension, and a startup sequence encoded in `AGENTS.md`. pi gives the substrate; the pattern is unwritten.
 
 This is not a gap in pi's theory; it is a conscious trade-off. pi's philosophy asks users to build their workflow. Continuity is one workflow.
 
@@ -255,7 +257,7 @@ The rationale for pi's design choices follows from a small number of premises ab
 
 If two coding agents using the same frontier model differ by 3× on real tasks, the difference is in tool design, context strategy, and guardrail configuration — not in model selection. A framework that bakes in a particular composition ships a particular opinion. A framework that exposes every composition surface lets the user own the opinion.
 
-pi is the second kind. This only makes sense if you believe the composition — not the model — is where the product lives. The book argues this explicitly (`Universality` section in `index.md`). pi demonstrates it by building the framework that follows from the argument.
+pi is the second kind. This only makes sense if you believe the composition — not the model — is where the product lives. The book argues this explicitly in README.md's "Composition Is the Differentiator" section. pi demonstrates it by building the framework that follows from the argument.
 
 ### Premise 2: Workflows Are Personal; Agents Must Adapt
 
@@ -269,9 +271,9 @@ Extensions, skills, prompt templates, and themes are hot-reloadable via `/reload
 
 This matters for the [Continuity](../patterns/continuity.md) pattern: over a multi-week project, the user's understanding of what the agent should do evolves. Hot-reload means the user can improve the agent while using it, without losing session state.
 
-### Premise 4: The Right Primitives Make Features Accidental
+### Premise 4: The Right Concept Decomposition Makes Features Accidental
 
-If your framework has hooks at each concept boundary, then "plan mode," "sub-agents," "MCP," "permission popups," "todos," "background bash," "git checkpointing," "sandbox execution" — every feature on every other agent's roadmap — is a weekend project. You do not ship these; you ship the _surface on which these are cheap_. This is the expression of the theorem that a complete primitive set closes under composition: once the primitives are right, features emerge from combinations, not from new code in the core.
+If your framework has hooks at each concept boundary — primitive, harness, environment — then "plan mode," "sub-agents," "MCP," "permission popups," "todos," "background bash," "git checkpointing," "sandbox execution" — every feature on every other agent's roadmap — is a weekend project. You do not ship these; you ship the _surface on which these are cheap_. This is the expression of the claim that a complete concept set closes under composition: once primitives, harness, and environment are right, features emerge as patterns over them, not from new code in the core.
 
 pi is a bet that this theorem holds in practice. The empirical evidence so far (a working Doom extension, a working sub-agent extension, a working permission gate, a working Claude-Code lookalike theme) suggests the bet is paying off.
 
@@ -290,9 +292,9 @@ pi is the coding agent whose architecture reflects how you already think. It doe
 
 ## Summary
 
-pi-mono is what you get when you design a coding agent from the same primitives the theory enumerates, without cheating by bundling. Its packages align with the theory's layers: `pi-ai` is the [LLM](../primitives/llm.md) primitive; `pi-agent-core` is the [AgentLoop](../harness/agent-loop.md) harness with hooks at every concept boundary; `pi-coding-agent` is the [Session](../harness/session.md) harness wrapped in a TUI. Extensions, skills, prompt templates, and pi-packages are the distribution layer that turns the compositional surface into an ecosystem.
+pi-mono is what you get when you design a coding agent from the same concepts the theory enumerates, without cheating by bundling. Its packages align with the theory's tiers: `pi-ai` implements [LLM](../primitives/llm.md) + [Prompt](../primitives/prompt.md) (unified provider-agnostic format); `pi-agent-core` is the [AgentLoop](../harness/agent-loop.md) + [Guardrail](../harness/guardrail.md) harness with hooks at every concept boundary; `pi-coding-agent` is the [Agent](../harness/agent.md) harness wrapping a [Session](../harness/session.md) behind multiple Frontends. Extensions, skills, prompt templates, and pi-packages are the distribution layer that turns the compositional surface into an ecosystem.
 
-The theory decomposes what pi exposes; pi exposes what the theory decomposes. They agree about the primitives and disagree only about emphasis: the theory is a map, pi is a worked example. The refinements pi suggests — the session-graph as a navigable Workspace over linear Sessions, the out-of-band user channel for steering/follow-up, compaction as a PromptLoading transform rather than a Memory write, many deployments from one cognitive core — belong in the book. The gaps pi leaves — Memory, Continuity, StateMachine for complex workflows — are where the book continues beyond any coding agent.
+The theory decomposes what pi exposes; pi exposes what the theory decomposes. They agree about the concepts and disagree only about emphasis: the theory is a map, pi is a worked example. The refinements pi suggests — the session-graph as a navigable Workspace over linear Sessions, the out-of-band user channel for steering/follow-up, compaction as a PromptLoading transform rather than a Memory write, many Frontends over one cognitive core — belong in the book. The gaps pi leaves — Memory, Continuity, StateMachine for complex workflows, Topology for multi-agent — are where the book continues beyond any single-agent coding tool.
 
 ---
 

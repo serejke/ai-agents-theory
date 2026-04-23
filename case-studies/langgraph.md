@@ -24,11 +24,11 @@ Each of these is a theory concept. LangGraph's contribution is bundling them int
 
 ---
 
-## LangGraph Mapped to Theory Primitives
+## LangGraph Mapped to the Theory
 
 ### StateMachine — LangGraph's Core
 
-LangGraph's `StateGraph` is a direct implementation of the theory's [StateMachine](../patterns/state-machine.md) primitive:
+LangGraph's `StateGraph` is a direct implementation of the theory's [StateMachine](../patterns/state-machine.md) pattern:
 
 ```
 Theory                          LangGraph
@@ -41,7 +41,7 @@ human_approval trigger          interrupt() + Command(resume=)
 PhaseConfig per phase           Different logic per node
 ```
 
-LangGraph validates the theory's claim that StateMachine is a fundamental building block — LangGraph built an entire framework around it.
+LangGraph validates the theory's claim that StateMachine is a fundamental pattern — LangGraph built an entire framework around it. Under the four-tier taxonomy, StateMachine composes Guardrail (phase-gated tool filtering) + a phase variable + transitions; LangGraph implements all three as a single graph DSL.
 
 ### Channel — Restricted to SharedState
 
@@ -76,7 +76,7 @@ This is a deliberate trade-off: you get checkpointing without deploying a separa
 LangGraph separates two persistence concepts:
 
 - **Checkpointer** — run-scoped state (conversation history, intermediate results). Maps to [Session](../harness/session.md) history + [Channel](../patterns/channel.md).
-- **Store** (`BaseStore`, `PostgresStore` with pgvector) — cross-thread, cross-session knowledge. Maps to the [Memory](../patterns/memory.md) primitive.
+- **Store** (`BaseStore`, `PostgresStore` with pgvector) — cross-thread, cross-session knowledge. Maps to the [Memory](../patterns/memory.md) pattern.
 
 This validates the theory's distinction between Channel (within a run) and Memory (across sessions). LangGraph gets this separation right.
 
@@ -92,7 +92,7 @@ The theory argues for separation of concerns. LangGraph bundles orchestration, s
 
 ### 2. The Graph Is One Implementation of StateMachine
 
-LangGraph's value proposition is the graph. The theory's actual primitive is StateMachine: phases with different capabilities and transition rules. A graph is one way to implement that. Imperative code with explicit phase tracking is another. The trade-offs between these approaches are analyzed in [StateMachine: Graph vs. Imperative](../patterns/state-machine.md).
+LangGraph's value proposition is the graph. The theory's concept underneath is the StateMachine pattern: phases with different capabilities and transition rules, built from Guardrail + a phase variable. A graph is one way to implement that. Imperative code with explicit phase tracking is another. The trade-offs between these approaches are analyzed in [StateMachine: Graph vs. Imperative](../patterns/state-machine.md).
 
 ### 3. Handoff Is a Distinct Routing Pattern
 
@@ -110,12 +110,13 @@ Insights that flow from the theory to LangGraph users — structural understandi
 
 ### 1. The Tool-Use Loop Is a While Loop
 
-LangGraph models `create_react_agent()` as a two-node graph. The theory correctly identifies this as [AgentLoop](../harness/agent-loop.md) — a recursive cycle that needs no graph. Anthropic's implementation is ~30 lines of imperative code. The graph adds overhead for something that is fundamentally:
+LangGraph models `create_react_agent()` as a two-node graph. The theory correctly identifies this as the [AgentLoop](../harness/agent-loop.md) harness — a recursive cycle that needs no graph. Anthropic's implementation is ~30 lines of imperative code. The graph adds overhead for something that is fundamentally:
 
 ```
 while true:
-    response = llm(messages)
-    if no tool calls: return response
+    prompt = assemble(system, messages, tool_schemas)
+    text, tool_calls = parse(llm(prompt))
+    if not tool_calls: return text
     results = execute(tool_calls)
     messages.append(results)
 ```
@@ -134,9 +135,9 @@ LangGraph's `Store` with pgvector addresses the storage mechanism but not the ha
 
 LangGraph bundles orchestration with execution. This works until you need system-level scheduling (cron, event-driven triggers), cross-service coordination, or durable execution guarantees on business operations. At that point, LangGraph becomes one component — managing the cognitive layer — within a larger system. The theory's [separation of concerns](../patterns/state-machine.md) predicts this: what starts as a single framework inevitably separates as the system grows.
 
-### 5. Every Primitive Boundary Is a Verification Surface
+### 5. Every Concept Boundary Is a Verification Surface
 
-The theory's [Verification](../verification/index.md) framework identifies [seams](../verification/seams.md) — primitive boundaries as natural test points. LangGraph's node boundaries, edge conditions, and state updates are all seams. But LangGraph's tooling (LangSmith) focuses primarily on trace capture and evaluation, not on the full verification stack (shell testing, property assertions, trajectory verification, snapshot testing). The theory provides a more comprehensive framework for thinking about agent verification.
+The theory's [Verification](../verification/index.md) framework identifies [seams](../verification/seams.md) — concept boundaries (between primitives, harness, environment, and patterns) as natural test points. LangGraph's node boundaries, edge conditions, and state updates are all seams. But LangGraph's tooling (LangSmith) focuses primarily on trace capture and evaluation, not on the full verification stack (shell testing, property assertions, trajectory verification, snapshot testing). The theory provides a more comprehensive framework for thinking about agent verification.
 
 ### 6. The Anti-Pattern Warning Applies
 
@@ -153,7 +154,7 @@ The guard is non-deterministic. For production systems, edge conditions should c
 
 ## Summary
 
-LangGraph is the theory's [StateMachine](../patterns/state-machine.md) as a product — with [Channel (SharedState)](../patterns/channel.md), checkpointing, and [AgentLoop](../harness/agent-loop.md) bundled in. It validates the theory's core claim that StateMachine is a fundamental building block. It revealed patterns (handoff, multi-agent topologies, concern-bundling) that are now part of the theory.
+LangGraph is the theory's [StateMachine](../patterns/state-machine.md) pattern as a product — with [Channel (SharedState)](../patterns/channel.md), checkpointing, and the [AgentLoop](../harness/agent-loop.md) harness bundled in. It validates the claim that StateMachine is a fundamental pattern worth recognizing. It revealed sub-patterns (handoff, multi-agent topologies, concern-bundling) that are now part of the theory — Topology is a full pattern in its own right; Handoff is documented under Router.
 
 The theory decomposes what LangGraph bundles. Neither is wrong — they operate at different levels of abstraction. The theory gives you the vocabulary to understand what LangGraph is made of and when its bundling helps vs. constrains.
 
@@ -161,7 +162,7 @@ The theory decomposes what LangGraph bundles. Neither is wrong — they operate 
 
 ## Related
 
-- [StateMachine](../patterns/state-machine.md) — LangGraph's core primitive, including the graph vs. imperative analysis
+- [StateMachine](../patterns/state-machine.md) — LangGraph's core pattern, including the graph vs. imperative analysis
 - [Channel](../patterns/channel.md) — full variant set vs. LangGraph's sole shared-state variant
 - [AgentLoop](../harness/agent-loop.md) — while loop vs. graph representation
 - [Memory](../patterns/memory.md) — full taxonomy vs. LangGraph's Store
