@@ -11,7 +11,18 @@ Not every task requires the same resources. A simple question about syntax can b
 ## Formal Definition
 
 ```typescript
-type Router = (input: string, context: Context) => SessionConfig;
+// The Router receives the user input and any ambient state the host system
+// wants to expose (current phase, user role, time of day, etc.), and returns
+// a Session configuration: the tools, system prompt, and LLM the matched
+// Session should run with.
+type Router = (
+  input: string,
+  context: Record<string, unknown>,
+) => {
+  tools: Tool[];
+  system: string;
+  llm: LLM;
+};
 ```
 
 Router is an ordinary function — it can be implemented as heuristics, as an LLM call, or as natural language descriptions on agent definitions. The implementation determines the trade-off between cost, flexibility, and determinism.
@@ -68,7 +79,7 @@ The word "AFTER" in the data-analyst description does the work of a state transi
 **Pros**: Zero routing code. Flexible — LLM adapts to context. Easy to add new agents.
 **Cons**: Non-deterministic — model may skip agents or invoke them out of order. Can't audit routing logic. No guarantees. Not suitable when ordering must be strict.
 
-**Applicability**: Prototypes, demos, systems where approximate routing is acceptable. For production pipelines with strict phase ordering, use explicit [StateMachine](../primitives/state-machine.md) transitions instead.
+**Applicability**: Prototypes, demos, systems where approximate routing is acceptable. For production pipelines with strict phase ordering, use explicit [StateMachine](state-machine.md) transitions instead.
 
 ---
 
@@ -99,7 +110,7 @@ Handoff is a composition of three concerns:
 
 ## Related
 
-- [AgentLoop](agent-loop.md) — what the Router configures and dispatches to
+- [AgentLoop](../harness/agent-loop.md) — what the Router configures and dispatches to
 - [Planner](planner.md) — Router may select different models for planning vs. implementation
-- [StateMachine](../primitives/state-machine.md) — code-level routing with guards; more reliable than prompt-based routing
-- [Deployment](deployment.md) — multi-agent topologies that use routing for coordination
+- [StateMachine](state-machine.md) — code-level routing with guards; more reliable than prompt-based routing
+- [Topology](topology.md) — multi-agent coordination shapes that use routing for control flow between agents

@@ -2,27 +2,32 @@
 
 A Workspace is a structured, persistent data space where agents read input, write intermediate artifacts, produce output, and collaborate with other agents and humans. It is the answer to "where does the agent work?" — a question that individual primitives don't address.
 
-**Composition**: [Tool](../primitives/tool.md) (filesystem operations) + [Channel](../primitives/channel.md) (shared directories between agents) + [ContextProvider](context.md) (hierarchy as navigable context). Optional: permissions, versioning, collaboration.
+**Composition**: [Tool](../primitives/tool.md) (filesystem operations) + [Channel](channel.md) (shared directories between agents) + [PromptLoading](prompt-loading.md) (hierarchy as navigable context). Optional: permissions, versioning, collaboration.
 
 ## Why It Matters
 
-An agent needs somewhere to work — not just tools to call and memory to recall, but a **place** where it reads context, writes artifacts, and collaborates. [Channel](../primitives/channel.md) answers "how does agent A's output reach agent B?" [Memory](../primitives/memory.md) answers "what does the agent know from past sessions?" Workspace answers **"where does the agent read, think, and write?"**
+An agent needs somewhere to work — not just tools to call and memory to recall, but a **place** where it reads context, writes artifacts, and collaborates. [Channel](channel.md) answers "how does agent A's output reach agent B?" [Memory](memory.md) answers "what does the agent know from past sessions?" Workspace answers **"where does the agent read, think, and write?"**
 
-Claude Code operates on a local filesystem. Devin gets a workspace with files and a shell. Enterprise agents need access to company documents with permissions and versioning. Coding agents navigate repository trees. Research agents write notes to directories that other agents read. In every case, the agent's effectiveness depends on the structure and semantics of the data space it inhabits.
+Claude Code operates on a local filesystem. OpenAI Codex gets a sandboxed cloud workspace. Enterprise agents need access to company documents with permissions and versioning. Coding agents navigate repository trees. Research agents write notes to directories that other agents read. In every case, the agent's effectiveness depends on the structure and semantics of the data space it inhabits.
 
 ## Formal Definition
 
 ```typescript
+// Pseudocode. Concrete implementations pick their own text/binary and
+// directory-entry representations.
 type Workspace = {
-  read: (path: string) => Content;
-  write: (path: string, content: Content) => void;
-  list: (path: string, pattern?: string) => Entry[];
-  search: (query: string) => Result[];
+  read: (path: string) => string | Buffer;
+  write: (path: string, content: string | Buffer) => void;
+  list: (
+    path: string,
+    pattern?: string,
+  ) => Array<{ name: string; kind: "file" | "dir" }>;
+  search: (query: string) => Array<{ path: string; snippet: string }>;
 
   // What distinguishes Workspace from raw filesystem access:
-  permissions?: PermissionLayer; // identity-based access control
-  versioning?: VersioningLayer; // automatic history of changes
-  structure: HierarchicalNamespace; // directory tree = knowledge graph
+  permissions?: (identity: string, path: string) => boolean; // identity-based access control
+  versioning?: { history: (path: string) => Array<{ id: string; at: Date }> }; // automatic history of changes
+  structure: "hierarchical"; // directory tree = knowledge graph
 };
 ```
 
@@ -50,7 +55,6 @@ Every major agent system converges on filesystem semantics for the workspace int
 | -------------------------------------- | --------------------------------------- |
 | Claude Code                            | Local repository filesystem             |
 | Cursor                                 | Repository + editor buffer              |
-| Devin                                  | Sandboxed workspace with files + shell  |
 | OpenAI Codex                           | Sandboxed cloud workspace               |
 | GitHub Copilot Workspace               | Virtual repository checkout             |
 | Enterprise platforms (Box, SharePoint) | Virtual filesystem over managed storage |
@@ -88,7 +92,7 @@ The agent doesn't need to understand the enterprise API. It understands files an
 
 ## Structural Navigation — Hierarchy as Retrieval
 
-Agent systems typically retrieve context through search (see [Memory retrieval strategies](../primitives/memory.md)). Workspace enables an additional strategy: **structural navigation** — the agent traverses a hierarchy to find relevant context.
+Agent systems typically retrieve context through search (see [Memory retrieval strategies](memory.md)). Workspace enables an additional strategy: **structural navigation** — the agent traverses a hierarchy to find relevant context.
 
 ```typescript
 // The agent navigates the tree, using directory names as semantic cues
@@ -117,7 +121,7 @@ At each level, the directory name tells the agent whether to go deeper or look e
 | Agent effort per query         | One search call                                       | Multiple list/read calls                |
 | Best for                       | "Find anything relevant to X"                         | "Navigate to the right area, then read" |
 
-The two strategies complement each other. Semantic search excels at cross-cutting queries ("find all mentions of GDPR compliance"). Structural navigation excels at scoped exploration ("what contracts do we have with this vendor?"). A well-designed workspace supports both.
+The strategies complement each other. Semantic search excels at cross-cutting queries ("find all mentions of GDPR compliance"). Structural navigation excels at scoped exploration ("what contracts do we have with this vendor?"). A well-designed workspace supports both.
 
 ---
 
@@ -130,7 +134,7 @@ Agent systems need access control. The question is where to enforce it. Two arch
 Permissions enforced at the orchestration layer, wrapping tool execution:
 
 ```typescript
-// From the Guardrail primitive
+// A Guardrail policy registered at the tool-dispatch hooks
 const noFinanceAccess: Guardrail = {
   pre: (action) => {
     if (action.params.path?.startsWith("/finance/"))
@@ -170,7 +174,7 @@ The agent never sees files it can't access — they're invisible in `list()` res
 | Enterprise agent on shared data | Data-level permissions | Must respect existing ACLs; can't re-implement org policies per agent                   |
 | Multi-tenant agent platform     | Both                   | Data-level for tenant isolation; agent-level for per-agent restrictions within a tenant |
 
-The enterprise case reveals why permission-aware workspaces matter: an organization with 10,000 employees and complex access policies can't re-encode those policies as agent [Guardrails](../primitives/guardrail.md). The workspace inherits them from the data layer. The agent is just another identity in the permission system — like a new employee who gets access based on their role, not a custom access list.
+The enterprise case reveals why permission-aware workspaces matter: an organization with 10,000 employees and complex access policies can't re-encode those policies as agent [Guardrails](../harness/guardrail.md). The workspace inherits them from the data layer. The agent is just another identity in the permission system — like a new employee who gets access based on their role, not a custom access list.
 
 ---
 
@@ -231,7 +235,7 @@ const sandboxedWorkspace: Workspace = {
 };
 ```
 
-**Seen in**: Devin, OpenAI Codex, cloud-based coding agents.
+**Seen in**: OpenAI Codex, cloud-based coding agents.
 **Strength**: Full isolation — agent can install packages, run servers, break things without affecting host. Clean state per task.
 **Weakness**: Setup overhead, no persistence across tasks without explicit export.
 
@@ -294,7 +298,6 @@ In enterprise settings, agent-written artifacts appear in the same team folders 
 ## Related
 
 - [Tool](../primitives/tool.md) — workspace operations are tools; workspace is a structured composition of them
-- [Channel](../primitives/channel.md) — shared directories within a workspace serve as channels between agents
-- [ContextProvider](context.md) — directory hierarchy is a navigable context source
-- [Guardrail](../primitives/guardrail.md) — agent-level permission enforcement within a workspace
-- [App Inversion](../app-inversion/architecture.md) — workspace is the agent-side surface of the tool boundary
+- [Channel](channel.md) — shared directories within a workspace serve as channels between agents
+- [PromptLoading](prompt-loading.md) — directory hierarchy is a navigable context source
+- [Guardrail](../harness/guardrail.md) — agent-level permission enforcement within a workspace

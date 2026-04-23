@@ -2,11 +2,13 @@
 
 A Channel is the mechanism through which agents in a multi-agent system pass intermediate results to each other. It is what makes multi-agent pipelines possible — without it, agents would be isolated, each working in a vacuum with no access to what other agents have produced.
 
+**Composition**: [Tool](../primitives/tool.md)-set (`write`, `read`) + convention over a shared substrate (filesystem path, queue, shared dict, git branch, or the parent agent's context window). What earns Channel its name as a distinct pattern is the _role_ — two agents agreeing on a substrate and naming convention for data handoff — not a new capability beyond Tool. The variants below are shapes this role takes.
+
 ## Why It Matters
 
 In a multi-agent pipeline, Agent A produces something that Agent B needs. How does B get it? This sounds trivial but it's a design decision with real consequences. The choice of channel determines: can agents run in parallel? Can you retry a failed phase? Can you inspect intermediate state? Can you isolate runs from each other?
 
-Channel is distinct from [Memory](memory.md): Memory persists knowledge **across sessions** (what did we learn yesterday?). Channel passes state **within a run** (what did the researcher find that the analyst needs?). And it's not a [Tool](tool.md) — tools are actions an agent takes; a channel is infrastructure between agents. It can't be decomposed into LLM + Tool. Without it, multi-agent systems can't exist.
+Channel is distinct from [Memory](memory.md) by scope and purpose: Memory persists knowledge across sessions (what did we learn yesterday?). Channel passes state within a run (what did the researcher find that the analyst needs?). Both are Tool-set patterns; they differ in cognitive role and persistence semantics, not in ingredient.
 
 ## Formal Definition
 
@@ -169,7 +171,7 @@ const gitChannel: Channel = {
 };
 ```
 
-**Seen in**: GitHub Action workflows (one job commits, another picks up), Devin (commits between planning and implementation).
+**Seen in**: GitHub Action workflows (one job commits, another picks up), coding agents that checkpoint between planning and implementation phases.
 
 | Property       | Value                                       |
 | -------------- | ------------------------------------------- |
@@ -212,6 +214,6 @@ type ChannelProperties = {
 ## Related
 
 - [Memory](memory.md) — persists knowledge across sessions; Channel passes state within a run
-- [Tool](tool.md) — actions an agent takes; Channel is infrastructure between agents
-- [Workspace](../patterns/workspace.md) — composes Channel with Tool and ContextProvider to create a structured data space
+- [Tool](../primitives/tool.md) — actions an agent takes; Channel is infrastructure between agents
+- [Workspace](workspace.md) — composes Channel with Tool and PromptLoading to create a structured data space
 - [StateMachine](state-machine.md) — defines the phases between which Channels pass data

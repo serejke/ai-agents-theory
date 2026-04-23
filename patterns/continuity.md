@@ -2,11 +2,11 @@
 
 Continuity is the protocol that enables coherent agent progress across multiple context windows. It is what separates "start from zero every session" from "pick up where the last session left off" — the difference between an agent that can handle a 30-minute task and one that can handle a 30-day project.
 
-**Composition**: [Memory](../primitives/memory.md) (ground truth + progress log) + [ContextProvider](context.md) (startup sequence) + [Guardrail](../primitives/guardrail.md) (clean state enforcement) + [Tool](../primitives/tool.md) (environment bootstrap).
+**Composition**: [Memory](memory.md) (ground truth + progress log) + [PromptLoading](prompt-loading.md) (startup sequence) + [Guardrail](../harness/guardrail.md) (clean state enforcement) + [Tool](../primitives/tool.md) (environment bootstrap).
 
 ## Why It Matters
 
-A [Session](session.md) is bounded by the [LLM](../primitives/llm.md)'s context window. When a task exceeds that window — and most real projects do — the agent needs multiple sessions. Without explicit continuity mechanisms, each new session faces two failure modes:
+A [Session](../harness/session.md) is bounded by the [LLM](../primitives/llm.md)'s context window. When a task exceeds that window — and most real projects do — the agent needs multiple sessions. Without explicit continuity mechanisms, each new session faces two failure modes:
 
 1. **Premature completion.** The agent looks around, sees code that exists, and concludes the job is done. Partially implemented features look like fully implemented features from inside a fresh context window. Without a ground truth document that defines "done," the agent has no way to know the difference.
 
@@ -21,14 +21,14 @@ type Continuity = {
   groundTruth: GroundTruth; // what "done" means — survives all sessions
   progressLog: ProgressLog; // what was done, what's next — updated each session
   bootstrap: Tool; // reproducible environment setup
-  startupSequence: ContextProvider; // orientation protocol at session start
+  startupSequence: PromptLoading; // orientation protocol at session start
   cleanState: Guardrail; // enforced handoff discipline at session end
 };
 ```
 
 ---
 
-## Five Components, Five Failure Modes
+## Components and Failure Modes
 
 Each component addresses a specific failure mode. Remove any one and the corresponding failure returns.
 
@@ -89,7 +89,7 @@ Every session that follows the first can begin by running the bootstrap rather t
 A fixed sequence of context-gathering steps that every session executes before beginning new work:
 
 ```typescript
-const startupSequence: ContextProvider = () => {
+const startupSequence: PromptLoading = () => {
   // 1. Read progress log — what was done last
   // 2. Read ground truth — what's done vs. remaining
   // 3. Check git log — recent changes
@@ -99,11 +99,11 @@ const startupSequence: ContextProvider = () => {
 };
 ```
 
-The startup sequence is a [ContextProvider](context.md) that assembles orientation context from the other continuity components. If the verification step reveals the environment is broken, the agent fixes existing breakage before touching anything new — preventing the compounding problem where new work is built on a broken foundation.
+The startup sequence is a [PromptLoading](prompt-loading.md) that assembles orientation context from the other continuity components. If the verification step reveals the environment is broken, the agent fixes existing breakage before touching anything new — preventing the compounding problem where new work is built on a broken foundation.
 
 ### Clean State — Prevents Messy Handoffs
 
-A [Guardrail](../primitives/guardrail.md) that enforces handoff discipline at the end of every session. The agent cannot consider its work done until:
+A [Guardrail](../harness/guardrail.md) that enforces handoff discipline at the end of every session. The agent cannot consider its work done until:
 
 ```typescript
 const cleanState: Guardrail = {
@@ -126,7 +126,7 @@ Git commits serve double duty here: they're both a documentation mechanism (desc
 
 ## Continuity vs. Memory
 
-Continuity composes [Memory](../primitives/memory.md) with other primitives to solve a specific problem. The relationship:
+Continuity composes [Memory](memory.md) with other primitives to solve a specific problem. The relationship:
 
 | Concern       | Memory                        | Continuity                                |
 | ------------- | ----------------------------- | ----------------------------------------- |
@@ -142,7 +142,7 @@ Memory answers "what does the agent know from past experience?" Continuity answe
 
 ## When Continuity Matters
 
-Continuity is unnecessary for tasks that fit within a single context window. For a quick bug fix, a code review, or a short conversation, [Session](session.md) history is sufficient.
+Continuity is unnecessary for tasks that fit within a single context window. For a quick bug fix, a code review, or a short conversation, [Session](../harness/session.md) history is sufficient.
 
 Continuity becomes essential when:
 
@@ -154,8 +154,8 @@ Continuity becomes essential when:
 
 ## Related
 
-- [Session](session.md) — within-session history; Continuity bridges across sessions
-- [Memory](../primitives/memory.md) — cross-session knowledge; Continuity is the task-progress specialization
-- [ContextProvider](context.md) — the startup sequence is a ContextProvider composition
-- [Guardrail](../primitives/guardrail.md) — clean state enforcement is a Guardrail
+- [Session](../harness/session.md) — within-session history; Continuity bridges across sessions
+- [Memory](memory.md) — cross-session knowledge; Continuity is the task-progress specialization
+- [PromptLoading](prompt-loading.md) — the startup sequence is a PromptLoading composition
+- [Guardrail](../harness/guardrail.md) — clean state enforcement is a Guardrail
 - [Workspace](workspace.md) — ground truth and progress logs live in the workspace as files

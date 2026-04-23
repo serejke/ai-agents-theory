@@ -1,10 +1,12 @@
 # Memory
 
-Memory is a read+write context provider that persists knowledge across sessions. It is what separates an agent that starts from zero every time from one that accumulates experience over time.
+Memory is a persistent read+write store of extracted knowledge that survives across Sessions. It is what separates an Agent that starts from zero every time from one that accumulates experience over time. Memory is a content source; its content reaches the [Prompt](../primitives/prompt.md) via a [PromptLoading](prompt-loading.md) strategy (usually dynamic retrieval).
+
+**Composition**: [Tool](../primitives/tool.md)-set (`recall`, `remember`) over persistent storage, plus the semantic role of storing _extracted knowledge_ rather than raw artifacts. Distinguished from a generic Tool by its cognitive role (long-term recall across sessions) and by its persistence guarantee (survives Session boundaries).
 
 ## Why It Matters
 
-The [LLM](llm.md) is stateless. [Session](../patterns/session.md) gives it history within a single conversation (`history: Message[]`), but this history is bounded by the context window (~200K tokens) and ephemeral — close the terminal, everything's lost. Each new session starts from zero: re-reads code, re-discovers architecture, doesn't remember that yesterday you decided not to use Tailwind and why.
+The [LLM](../primitives/llm.md) is stateless. [Session](../harness/session.md) gives it history within a single conversation (`history: Message[]`), but this history is bounded by the context window (~200K tokens) and ephemeral — close the terminal, everything's lost. Each new session starts from zero: re-reads code, re-discovers architecture, doesn't remember that yesterday you decided not to use Tailwind and why.
 
 Memory closes this gap. It extracts knowledge from interactions, persists it across sessions, and retrieves relevant knowledge when starting new work. Without Memory, every agent interaction is a first encounter. With it, the agent behaves less like a new contractor and more like a team member.
 
@@ -25,11 +27,11 @@ type MemoryEntry = {
 };
 ```
 
-Memory extends [ContextProvider](../patterns/context.md) with write capability. A ContextProvider is read-only — it gathers knowledge and injects it into the LLM's context. Memory adds `remember()`: the ability to extract and persist knowledge from the current interaction for future retrieval.
+Memory is a content source with persistence semantics; [PromptLoading](prompt-loading.md) is how that content reaches the [Prompt](../primitives/prompt.md). A typical setup: `remember()` writes to the store at session boundaries (or continuously); `recall(query)` is invoked dynamically per turn by a PromptLoading strategy that retrieves relevant entries and inserts them into the Prompt.
 
 ---
 
-## Three Types of Memory
+## Types of Memory
 
 By analogy with cognitive science, agent memory divides into three kinds that serve different purposes.
 
@@ -84,7 +86,7 @@ Learned workflows and patterns for accomplishing tasks in this context.
 
 ---
 
-## Four Architectural Questions
+## Architectural Questions
 
 The design of any memory system reduces to four decisions.
 
@@ -125,7 +127,7 @@ type RetrievalStrategy =
 
 `always_load` works while memory is small (CLAUDE.md under ~1000 lines). For real persistent memory you need `semantic_search` or `llm_curated` — strategies that scale with the volume of accumulated knowledge.
 
-A fifth retrieval strategy — **structural navigation** — emerges when memory is organized hierarchically. The agent traverses a directory tree, using names as semantic cues to find relevant context. See [Workspace](../patterns/workspace.md) for this approach.
+A fifth retrieval strategy — **structural navigation** — emerges when memory is organized hierarchically. The agent traverses a directory tree, using names as semantic cues to find relevant context. See [Workspace](workspace.md) for this approach.
 
 ### 4. Where does it live?
 
@@ -141,7 +143,7 @@ The `git_repo` option is particularly interesting: memory becomes part of the pr
 
 ---
 
-## Three Scopes
+## Scopes
 
 Memory operates at three levels that nest during recall:
 
@@ -180,7 +182,7 @@ The main gap: no system that automatically (`on_session_end`) extracts `decision
 
 ## CLAUDE.md as Disguised Shared Memory
 
-CLAUDE.md is Memory in a primitive form. Write "No Tailwind, use CSS custom properties" — that's semantic memory. Write "After changes, run lint && build" — that's procedural memory. But it's a manual process with limited capacity — a large CLAUDE.md stops working because `always_load` fills the context window.
+CLAUDE.md is Memory in its most basic form. Write "No Tailwind, use CSS custom properties" — that's semantic memory. Write "After changes, run lint && build" — that's procedural memory. But it's a manual process with limited capacity — a large CLAUDE.md stops working because `always_load` fills the context window.
 
 The breakthrough is when the loop closes: the agent itself writes to memory after each session (`on_session_end` + `decisions` extraction) and itself chooses what to retrieve for the next task (`semantic_search` or `llm_curated` recall). Then CLAUDE.md transforms from a static file into a living, growing knowledge base — and every new agent connecting to the project starts not from zero, but with the accumulated experience of all previous sessions.
 
@@ -188,8 +190,8 @@ The breakthrough is when the loop closes: the agent itself writes to memory afte
 
 ## Related
 
-- [LLM](llm.md) — stateless; Memory is what gives persistence on top of statelessness
-- [ContextProvider](../patterns/context.md) — read-only knowledge injection; Memory extends it with write capability
-- [Session](../patterns/session.md) — within-conversation history; Memory is the cross-session equivalent
+- [LLM](../primitives/llm.md) — stateless; Memory is what gives persistence on top of statelessness
+- [PromptLoading](prompt-loading.md) — strategies for getting Memory content into the Prompt; Memory is the source, PromptLoading is the delivery mechanism
+- [Session](../harness/session.md) — within-conversation history; Memory is the cross-session equivalent
 - [Channel](channel.md) — passes data within a run; Memory persists knowledge across runs
-- [Continuity](../patterns/continuity.md) — composes Memory with other primitives for multi-session task progress
+- [Continuity](continuity.md) — composes Memory with other patterns for multi-session task progress

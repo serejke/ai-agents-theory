@@ -76,48 +76,9 @@ Formally, the Evaluator is a composition of LLM + loop. But it produces **emerge
 
 ---
 
-## Two Deployment Modes
-
-The same Evaluator implementation serves two different purposes depending on when and how it runs:
-
-```
-Runtime Evaluator:   trigger = auto       → output = feedback loop (retry on failure)
-Offline Evaluator:   trigger = CI / cron  → output = score tracking (alert on regression)
-```
-
-**Runtime**: The Evaluator runs as part of the agent's execution. If the verdict fails, the agent retries. This is self-correction — the Evaluator is in the loop.
-
-**Offline**: The Evaluator runs after the fact, as part of a [Verification](../verification.md) suite. It scores the output against criteria and tracks quality over time. If scores drop below a threshold, it alerts — but doesn't retry. This is quality monitoring.
-
-The pattern is identical. The deployment is different. This means eval infrastructure and runtime evaluation can share the same Evaluator implementation — define criteria once, use them for both self-correction and offline quality tracking.
-
-```typescript
-// Define once:
-const criteria: EvalCriterion[] = [
-  {
-    name: "accuracy",
-    description: "All facts consistent with input data",
-    scoringGuide: "5=perfect, 3=minor inaccuracies, 1=hallucinated",
-  },
-  {
-    name: "completeness",
-    description: "Covers all wallets and significant transactions",
-    scoringGuide: "5=all covered, 3=some missing, 1=most missing",
-  },
-];
-
-// Use for runtime self-correction:
-const runtimeEval = createEvaluator(criteria, { onFail: "retry" });
-
-// Use for offline quality tracking:
-const offlineEval = createEvaluator(criteria, { onFail: "alert" });
-```
-
----
-
 ## Evaluator as StateMachine Trigger
 
-Evaluators frequently serve as transition triggers in a [StateMachine](../primitives/state-machine.md):
+Evaluators frequently serve as transition triggers in a [StateMachine](state-machine.md):
 
 ```typescript
 {
@@ -139,6 +100,6 @@ The Evaluator determines whether the workflow advances or loops back for another
 ## Related
 
 - [LLM](../primitives/llm.md) — the assessment engine in an LLM-as-judge evaluator
-- [AgentLoop](agent-loop.md) — what the Evaluator wraps with a retry loop
-- [StateMachine](../primitives/state-machine.md) — Evaluator verdicts often trigger state transitions
-- [Verification](../verification.md) — offline deployment of the Evaluator pattern for quality tracking
+- [AgentLoop](../harness/agent-loop.md) — what the Evaluator wraps with a retry loop
+- [StateMachine](state-machine.md) — Evaluator verdicts often trigger state transitions
+- [Verification](../verification/index.md) — offline deployment of the Evaluator pattern for quality tracking

@@ -2,33 +2,44 @@
 
 A StateMachine defines phases with different capabilities and explicit transition rules between them, including human checkpoints. It is what separates a single continuous conversation from a structured workflow with distinct stages, verification gates, and rollback points.
 
+**Composition**: [Guardrail](../harness/guardrail.md) + a phase variable + transition rules. Each phase is a [Session](../harness/session.md) configuration (its own tool-set, system prompt, guardrails). The phase variable lives outside the LLM's control; Guardrails consult it at each tool call to decide what is allowed in the current phase; transitions are triggered by explicit events (human approval, evaluator verdict, timeout).
+
 ## Why It Matters
 
-A [Session](../patterns/session.md) is one continuous conversation — the agent has the same tools and the same authority from start to finish. Real workflows need phases: first explore the code (read-only), then get human approval, then implement (full access), then verify (run tests), then deliver (create PR). Each phase has different tools, different permissions, and different success criteria. Transitions between phases may require human approval, evaluation results, or guard conditions.
+A [Session](../harness/session.md) is one continuous conversation — the agent has the same tools and the same authority from start to finish. Real workflows need phases: first explore the code (read-only), then get human approval, then implement (full access), then verify (run tests), then deliver (create PR). Each phase has different tools, different permissions, and different success criteria. Transitions between phases may require human approval, evaluation results, or guard conditions.
 
-Without StateMachine, you either build a single all-powerful agent (risky — it can write code before understanding the problem) or manually orchestrate phases by running separate agents and coordinating them yourself. StateMachine is the primitive that makes multi-phase workflows first-class — and arguably the main missing piece for transitioning from "agent in terminal" to "agent as CI/CD pipeline."
+Without StateMachine, you either build a single all-powerful agent (risky — it can write code before understanding the problem) or manually orchestrate phases by running separate agents and coordinating them yourself. StateMachine is what makes multi-phase workflows first-class — and arguably the main missing piece for transitioning from "agent in terminal" to "agent as CI/CD pipeline."
 
 ## Formal Definition
 
 ```typescript
 type Phase = "plan" | "approve" | "implement" | "verify" | "deliver";
 
+// A per-phase Session configuration: which tools and system prompt apply
+// while the StateMachine is in this phase.
+type PhaseConfig = {
+  tools: Tool[];
+  system: string;
+};
+
 type Transition = {
   from: Phase;
   to: Phase;
   trigger: "auto" | "human_approval" | "evaluation_passed" | "timeout";
-  guard?: (context: Context) => boolean; // transition condition
+  // Optional guard: inspects ambient state (progress log, evaluator verdict,
+  // user flags) to decide whether the transition fires.
+  guard?: (state: Record<string, unknown>) => boolean;
 };
 
 type StateMachine = {
-  phases: Record<Phase, SessionConfig>; // each phase has its own configuration
+  phases: Record<Phase, PhaseConfig>;
   transitions: Transition[];
   currentPhase: Phase;
   advance: (trigger: string) => Phase; // move to next phase
 };
 ```
 
-Each phase is essentially a different [Session](../patterns/session.md) configuration — different tools, different system prompt, different output target. The StateMachine manages the progression between these configurations according to explicit rules.
+Each phase is essentially a different [Session](../harness/session.md) configuration — different tools, different system prompt, different output target. The StateMachine manages the progression between these configurations according to explicit rules.
 
 ---
 
@@ -205,8 +216,8 @@ The guard is non-deterministic. There's no structural guarantee the LLM routes c
 
 ## Related
 
-- [Session](../patterns/session.md) — a single continuous conversation; StateMachine chains multiple Sessions with different configurations
-- [Guardrail](guardrail.md) — constrains actions within a phase; StateMachine constrains transitions between phases
-- [Evaluator](../patterns/evaluator.md) — often used as a transition trigger (`evaluation_passed` / `evaluation_failed`)
-- [Deployment](../patterns/deployment.md) — StateMachine is a key component of production deployments
+- [Session](../harness/session.md) — a single continuous conversation; StateMachine chains multiple Sessions with different configurations
+- [Guardrail](../harness/guardrail.md) — constrains actions within a phase; StateMachine constrains transitions between phases
+- [Evaluator](evaluator.md) — often used as a transition trigger (`evaluation_passed` / `evaluation_failed`)
+- [Agent](../harness/agent.md) — StateMachine is a key component of production Agents
 - [LangGraph case study](../case-studies/langgraph.md) — a framework built around StateMachine as a product
