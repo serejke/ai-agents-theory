@@ -8,15 +8,19 @@ Most documentation describes agents in terms of specific products and frameworks
 
 ## What Is an Agent?
 
-An **Agent** is the runnable unit: a Session wrapped in a Frontend and pinned to an Environment. It is what people mean when they say "I built an agent," "the Claude Code agent," or "a Slack agent" — the whole invocable thing, not just the reasoning inside it.
+An **Agent** is a program that takes a task, reasons about it with a language model, picks actions (reading files, calling APIs, running shell commands), sees what happened, and keeps going until it's done. You invoke it somehow — on the command line, from another program, through a web request — and results come back through the same channel. When people say "I built an agent that triages my inbox," "the Claude Code agent," or "a Slack agent," they mean one of these runnable programs.
+
+Underneath, every Agent has three parts:
+
+- A **frontend** — how the outside world talks to it and where its output goes. A terminal reads your keystrokes and prints back; an SDK exposes a function call; a GitHub Action fires on an issue and writes a comment. Same Agent underneath, different frontends.
+- A **cognitive core** — the reasoning loop. The language model looks at the current situation, picks a tool to run, sees the result, and decides what's next. Turn by turn, the conversation accumulates. The theory calls this the **Session**, and the loop inside it the **[AgentLoop](harness/agent-loop.md)**.
+- An **environment** — the substrate it acts on. Your laptop's filesystem, a sandboxed container, a set of API credentials, a database. Two Agents with the exact same cognitive core can behave very differently depending on what's reachable in the environment.
+
+Written as a formula:
 
 ```
 Agent = Frontend + Session + Environment
 ```
-
-- The **Frontend** is how the outside world invokes the Agent and receives its output — CLI, SDK, HTTP endpoint, GitHub Action, Slack bot, cron job, webhook.
-- The **Session** is the cognitive core — an [AgentLoop](harness/agent-loop.md) iterating over [LLM](primitives/llm.md) reasoning and [Tool](primitives/tool.md) execution, with accumulated history.
-- The **Environment** is the substrate the Agent acts upon — filesystem, runtime, network, credentials, or a sandboxed restriction of any of these.
 
 Everything else in this book is either (a) a piece of an Agent, (b) a way of building an Agent's parts, or (c) a composition that arranges multiple Agents or extends one.
 
