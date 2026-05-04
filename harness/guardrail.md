@@ -10,7 +10,7 @@ Every tool call in an Agent goes through a dispatch step: the LLM decides → di
 
 This matters because everything else in an Agent — the system prompt, tools, memory — the LLM can ignore or interpret its own way. Tell it "don't push to main" in the system prompt and it will usually comply, but there's no guarantee. A Guardrail makes compliance structural: the `push --force` command is intercepted and blocked before it reaches the shell, regardless of what the LLM intended.
 
-Guardrail is harness, not a compositional choice. An Agent without registered policies still has the Guardrail machinery — the hooks fire, they just return allow by default. Pi's `beforeToolCall`/`afterToolCall` are first-class API in `pi-agent-core` (the AgentLoop harness), called on every tool invocation even when no handlers are attached. Saying "my Agent has no Guardrails" means "no policies registered" — not "no interception point." The distinction between suggestions the model might follow and constraints the model cannot violate is what separates a prototype from a production Agent.
+Guardrail is harness, not a compositional choice. An Agent without registered policies still has the Guardrail machinery — the hooks fire, they just return allow by default. PI's `beforeToolCall`/`afterToolCall` are first-class API in `pi-agent-core` (the AgentLoop harness), called on every tool invocation even when no handlers are attached. Saying "my Agent has no Guardrails" means "no policies registered" — not "no interception point." The distinction between suggestions the model might follow and constraints the model cannot violate is what separates a prototype from a production Agent.
 
 ## Formal Definition
 

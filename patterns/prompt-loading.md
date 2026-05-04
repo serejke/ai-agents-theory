@@ -68,7 +68,7 @@ Only a pointer (name + description) lives in the Prompt eagerly — often as a t
 **Strength**: Scales — the Agent can have hundreds of skills without blowing up the Prompt.
 **Weakness**: The LLM has to recognize when to pull. If the description is weak or the skill is obscurely named, the content won't be loaded even when it would help.
 
-Claude Skills, pi's Skill convention, and Cursor's indexed docs are all lazy PromptLoading — the filesystem or the index holds the content; the Prompt holds only enough to make the LLM pull.
+Claude Skills, PI's Skill convention, and Cursor's indexed docs are all lazy PromptLoading — the filesystem or the index holds the content; the Prompt holds only enough to make the LLM pull.
 
 ### Progressive disclosure — minimal upfront, expand on request
 

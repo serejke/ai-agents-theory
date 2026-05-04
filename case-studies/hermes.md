@@ -137,4 +137,4 @@ Runtime skill creation is the harness-tier counterpart to a separate, slower sel
 ## Related
 
 - [LangGraph case study](langgraph.md)
-- [pi-mono case study](pi-mono.md)
+- [PI case study](pi.md)

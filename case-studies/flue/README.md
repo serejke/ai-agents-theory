@@ -18,14 +18,14 @@ Three properties make Flue worth examining as a case study:
 
 The tool surface itself (`read / write / edit / bash / grep / glob / task`) is deliberately the same as Claude Code's, so prompts and skills written for Claude Code port directly. Internally, Flue wraps `@mariozechner/pi-agent-core`'s `Agent` and uses a _scoped-runtime_ pattern — temporarily swapping the agent's tools/model/system-prompt for the duration of one `prompt` / `skill` / `task` call, then restoring — to implement per-call overrides without forking the underlying loop.
 
-Flue is built directly on top of [pi-mono](../pi-mono.md)'s `@mariozechner/pi-ai` and `@mariozechner/pi-agent-core` — it inherits the LLM/Prompt unification, the AgentLoop, the Guardrail hooks, and Session/compaction, and adds a deploy layer on top (HTTP service Frontend, runtime-pluggable Environment, Topology via `task`, typed-eager skill invocation, Roles, persistent multi-tenant `SessionStore`, per-call scoped overrides, AI-generated connectors). [theory.md](theory.md) walks through what's inherited vs added against the theory's vocabulary.
+Flue is built directly on top of [PI](../pi.md)'s `@mariozechner/pi-ai` and `@mariozechner/pi-agent-core` — it inherits the LLM/Prompt unification, the AgentLoop, the Guardrail hooks, and Session/compaction, and adds a deploy layer on top (HTTP service Frontend, runtime-pluggable Environment, Topology via `task`, typed-eager skill invocation, Roles, persistent multi-tenant `SessionStore`, per-call scoped overrides, AI-generated connectors). [theory.md](theory.md) walks through what's inherited vs added against the theory's vocabulary.
 
 ## Documents in this case study
 
 - **[components.md](components.md)** — the eight high-level components grouped by responsibility (build pipeline, runtime entry, session harness, sandbox substrate, tool surface, context layer, persistence/compaction, developer toolchain). Read this first for the structural map.
 - **[pseudocode.md](pseudocode.md)** — the conceptual architecture rendered as pseudocode: build pipeline, generated entry, session harness loop, the scoped-runtime mechanism, sandbox abstraction, task subagents, compaction. Read this when you want to see the _shape_ end-to-end.
-- **[theory.md](theory.md)** — Flue cross-referenced against the theory and the [pi-mono](../pi-mono.md) case study: what Flue inherits, what it adds, and which pi-mono gaps it closes vs. accepts.
+- **[theory.md](theory.md)** — Flue cross-referenced against the theory and the [PI](../pi.md) case study: what Flue inherits, what it adds, and which PI gaps it closes vs. accepts.
 
 ## In one sentence
 
-A build system that turns a markdown-defined workspace into a runtime-agnostic, sandboxed, multi-session HTTP service wrapping pi-agent-core, with the same tool surface and ergonomics as Claude Code.
+A build system that turns a markdown-defined workspace into a runtime-agnostic, sandboxed, multi-session HTTP service wrapping `pi-agent-core`, with the same tool surface and ergonomics as Claude Code.

@@ -79,7 +79,7 @@ The gap between them is where knowledge is lost. Everything discussed in a sessi
 
 Sessions are linear by definition, but multiple sessions can share a common prefix — a forked session's first N messages are identical to another's. Most systems hide this relation: forking means a full copy, resuming means loading one session in isolation. A **session-graph** makes the shared-prefix relation first-class — sessions are stored as parent-linked nodes, and a pointer selects which leaf is active. Branching becomes a pointer move rather than a copy; switching between explored alternatives is cheap.
 
-This is a [Workspace](../patterns/workspace.md)-shaped structure _over_ Sessions, not a change to Session itself. Each leaf is still a linear history, and the LLM always sees a flat root-to-leaf slice. What becomes navigable is the graph itself — nodes are conversation states, edges are parent links. For workflows that rely on exploration ("try three approaches, keep the one that worked") the session-graph is a useful structure to expose; for conventional turn-by-turn chat it is unnecessary. The [pi-mono case study](../case-studies/pi-mono.md) is a concrete implementation.
+This is a [Workspace](../patterns/workspace.md)-shaped structure _over_ Sessions, not a change to Session itself. Each leaf is still a linear history, and the LLM always sees a flat root-to-leaf slice. What becomes navigable is the graph itself — nodes are conversation states, edges are parent links. For workflows that rely on exploration ("try three approaches, keep the one that worked") the session-graph is a useful structure to expose; for conventional turn-by-turn chat it is unnecessary. The [PI case study](../case-studies/pi.md) is a concrete implementation.
 
 ---
 
