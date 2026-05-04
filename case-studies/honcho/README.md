@@ -1,8 +1,8 @@
 # Case Study: Honcho
 
-You forward every message your agent and your user exchange to Honcho. Honcho quietly builds and maintains a profile of each participant — atomic facts, behavioral patterns, durable identity. When your agent later wants to know something about the user, it asks Honcho a plain-English question and gets back a grounded answer with provenance back to the source messages. No vector queries, no prompt engineering, no hand-curated memory schema.
+**Honcho** is an open-source memory service for LLM agent applications, authored by Plastic Labs. It runs as a FastAPI HTTP API plus a background worker process backed by Postgres — a standalone service next to an agent, integrated over HTTP. Its data model has four entities — **Workspaces**, **Peers**, **Sessions**, **Messages** — and a simple operational shape: messages go in via POST, conclusions come out through a per-peer chat endpoint that takes a natural-language query and returns a grounded answer.
 
-Underneath, Honcho is a memory infrastructure for LLM agents that continuously refines a structured _theory of who each peer is_ and serves that theory back through a natural-language query endpoint. Background processes operate at different latencies to keep the theory current; what looks like a queue-driven service from outside is, conceptually, a continuous theory-building loop.
+What it replaces is the standard "raw transcripts plus a vector store" pattern. Instead of indexing messages, Honcho stores **derived conclusions about each peer**, linked via `source_ids` to the messages or earlier conclusions they came from. Recall is a tool-using LLM call over that provenance-tracked graph, not a flat vector lookup. The conceptual frame underneath is the subject of [case-study.md](case-study.md).
 
 ## What it looks like in practice
 
