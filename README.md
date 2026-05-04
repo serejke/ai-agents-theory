@@ -97,7 +97,7 @@ These documents are not numbered chapters. Each is self-contained — you can st
 
 **If you want to understand what's missing from current Agents:** Read [Memory](patterns/memory.md) and [StateMachine](patterns/state-machine.md). Memory is the gap between "starts from zero every session" and "accumulates knowledge over time." StateMachine is the gap between "agent in a terminal" and "agent as a reliable workflow."
 
-**If you want to see the theory applied:** The [LangGraph case study](case-studies/langgraph.md) decomposes a bundled framework into the theory's vocabulary, revealing both what the framework gets right and where it makes constraining trade-offs. The [pi-mono case study](case-studies/pi-mono.md) decomposes the opposite design — a minimal core that exposes every concept boundary as an extension point — and cross-references it against the theory in both directions.
+**If you want to see the theory applied:** The [LangGraph case study](case-studies/langgraph.md) decomposes a bundled framework into the theory's vocabulary, revealing both what the framework gets right and where it makes constraining trade-offs. The [pi-mono case study](case-studies/pi-mono.md) decomposes the opposite design — a minimal core that exposes every concept boundary as an extension point — and cross-references it against the theory in both directions. The [Hermes Agent case study](case-studies/hermes.md) decomposes a persistent personal-agent framework whose realisation deepens how particular concepts — Prompt cache integrity, layered Memory views, Evaluator-shaped sub-Agents — can be utilised in practice.
 
 ---
 
