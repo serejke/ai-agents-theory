@@ -1,0 +1,28 @@
+# The configuration of stelint, the linter for the comments and the Markdown
+# documents of this project. `.claude/rules/stelint-prose.md` gives the rules
+# that it checks. The dictionaries of `.stelint/dictionaries/` give the terms
+# of this project.
+
+[files]
+# stelint checks each file of a language that it reads, for example `.rs`
+# and `.md`. `include` can give fewer files. `exclude` gives the files not to
+# check, for example generated code. stelint also ignores each file that
+# `.gitignore` ignores. stelint writes these writing guides, and the project
+# does not change them.
+exclude = [
+    ".claude/rules/stelint-prose.md",
+    ".claude/rules/stelint-names.md",
+    ".claude/rules/stelint-check.md",
+    ".claude/rules/stelint-rust.md",
+]
+
+[words]
+# The word lists of stelint: `stelint:software` holds the words of software,
+# `stelint:numbers` the number words, and `stelint:stelint` the terms of
+# stelint. The ASD-STE100 word list holds the approved words of English.
+# stelint does not supply it, because ASD has the copyright of its data. Each
+# person keeps a copy in the home folder. stelint also reads each word list
+# of `.stelint/words/`.
+lists = ["stelint:software", "stelint:numbers", "~/.stelint/words/asd-ste100-issue9.toml"]
+
+[rules]
