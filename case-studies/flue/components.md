@@ -1,80 +1,232 @@
-# High-Level Components of Flue
+<a id="high-level-components-of-flue"></a>
 
-Flue decomposes into eight components. I'm grouping by responsibility, not by file — several of these are spread across multiple modules, and one (the connector system) lives outside `packages/` entirely.
+# The components of Flue
 
-## 1. Workspace Model & Build Pipeline
+Flue has eight components. This document puts them in groups by function, not by
+file. Some components are in two or more modules. One component, the connector
+system, is not in `packages/`.
 
-_`build.ts`, `build-plugin-node.ts`, `build-plugin-cloudflare.ts`, `cloudflare-wrangler-merge.ts`_
+<a id="1-workspace-model--build-pipeline"></a>
 
-The compilation contract. Defines what a Flue project _is_ on disk (`agents/`, `roles/`, optional `.agents/skills/`, `AGENTS.md`) and turns it into a deployable artifact via a `BuildPlugin` interface with two modes: `'esbuild'` (Node — emit a final `server.mjs`) and `'none'` (Cloudflare — emit raw entry source for wrangler to bundle, deliberately avoiding double-bundling against `nodejs_compat`). Discovers agents by scanning files for an exported `triggers` object. Critically: AGENTS.md and skills are _not_ bundled — they're discovered at runtime from the session's cwd, which is what enables R2-mounted knowledge bases and live filesystem agents.
+## 1. The project folder and the build pipeline
 
-## 2. Runtime Entry & Trigger Layer
+_`build.ts`, `build-plugin-node.ts`, `build-plugin-cloudflare.ts`,
+`cloudflare-wrangler-merge.ts`_
 
-_generated `_entry.ts` + `internal.ts` + `errors.ts` + `error-utils.ts`_
+This component is the contract of the build. It tells which files a Flue project
+has on disk: `agents/`, `roles/`, an optional `.agents/skills/` and `AGENTS.md`.
+It compiles these files into an output that you can deploy.
 
-The per-target server shell that the build emits. Maps webhook triggers to HTTP routes, parses/validates the agent request, builds the `FlueContext` via `createFlueContext`, dispatches to the user's handler, and streams events as SSE. `internal.ts` is the stable bare-specifier surface the generated entry imports from — kept narrow on purpose so user projects don't need pi-ai as a direct dep. Cron triggers are manifest-only here; the platform (CF Cron, GitHub Actions schedule) does the firing.
+The build does not put `AGENTS.md` and the skills into the output. This is the
+most important decision of the build. Flue finds these files at runtime, in the
+folder of the Session. Thus the knowledge of an agent can be on R2, and an agent
+can operate on a live filesystem.
 
-## 3. Session Harness
+The build finds the agents in the files that export a `triggers` object. It
+makes the output with a `BuildPlugin` interface, which has two modes:
+
+- `'esbuild'` is for Node. It writes a `server.mjs` file.
+- `'none'` is for Cloudflare. It writes the source of the entry, and `wrangler`
+  makes the bundle. This mode prevents a second bundle of the code with
+  `nodejs_compat`.
+
+<a id="2-runtime-entry--trigger-layer"></a>
+
+## 2. The runtime entry and the trigger layer
+
+_the `_entry.ts` that the build writes, `internal.ts`, `errors.ts`,
+`error-utils.ts`_
+
+The build writes a server shell for each target. This shell does these tasks:
+
+1. It connects each webhook trigger to an HTTP endpoint.
+2. It reads and examines the request to the agent.
+3. It makes the `FlueContext` with `createFlueContext`.
+4. It sends the request to the handler of the user.
+5. It sends the steps of the agent to the client with SSE.
+
+The entry imports its items from `internal.ts`, which is a small and stable
+module. Flue keeps this module small by decision. Thus `pi-ai` is not a
+dependency in the package manifest of a user project.
+
+Cron triggers are only entries in the manifest here. The platform starts them,
+for example the cron of Cloudflare or the cron of GitHub Actions.
+
+<a id="3-session-harness"></a>
+
+## 3. The Session harness
 
 _`session.ts`, `agent-client.ts`, `client.ts`_
 
-The core. `client.ts::createFlueContext` produces the `FlueContext` handlers see. `init()` resolves the sandbox, discovers context, and constructs an `AgentClient` (the `FlueAgent`). `AgentClient` owns a session map; each `Session` wraps one `pi-agent-core` `Agent` and adds:
+This component is the core of Flue. `client.ts::createFlueContext` makes the
+`FlueContext` that the handlers get. `init()` finds the sandbox, finds the
+context and makes an `AgentClient`, which is the `FlueAgent`. The `AgentClient`
+keeps a map of Sessions. Each `Session` contains one `Agent` of `pi-agent-core`
+and adds these functions.
 
-- **Three call surfaces** — `prompt`, `skill`, `task` — that all funnel through `withScopedRuntime`, which temporarily mutates the inner harness's `model / systemPrompt / tools` for the duration of the call and restores on exit. This is how per-call role/model/tool/command overrides work without forking the Agent.
-- **Task subagents** — `task()` spawns a _child Session_ with its own context (separate cwd, role, history), depth-bounded to 4. The built-in `task` tool is the LLM-facing entry point to the same machinery.
-- **Schema-typed results** — `result: v.object(...)` triggers a result-extraction sub-prompt (`result.ts`) with retry on validation failure.
+### Calls with changes for one call
 
-## 4. Sandbox Substrate (`SessionEnv`)
+A Session has the calls `prompt`, `skill` and `task`. Each call goes through
+`withScopedRuntime`. During the call, this function changes the `model`, the
+`systemPrompt` and the `tools` of the inner harness. At the end of the call, it
+puts back the previous values. Thus a call can change the role, the model, the
+tools and the commands, and Flue does not make a second copy of the `Agent`.
 
-_`types.ts`, `sandbox.ts`, `env-utils.ts`, `cloudflare/cf-sandbox.ts`, `cloudflare/virtual-sandbox.ts`_
+### Task subagents
 
-The universal interface — `exec + readFile/writeFile/stat/readdir/mkdir/rm + cwd + resolvePath + scope + cleanup` — that every sandbox mode implements. Four concrete adapters:
+`task()` starts a new Session for a subagent. This Session has a different
+context: a different folder, a different role and a different history. The
+maximum depth of these Sessions is 4. The LLM can use the same mechanism with
+the `task` tool.
 
-- **Empty / virtual** — in-memory just-bash, no host access (default; cheap, fast, fits the high-traffic agent profile)
-- **Local** — host filesystem mounted at `/workspace`, Node only
-- **BashFactory** — user-supplied factory returning fresh `Bash` instances; FS shared via closure
-- **SandboxFactory** — external sandboxes (Daytona, CF Containers, Vercel, etc.) wrapped through a single adapter point
+### Results with a schema
 
-Plus `createCwdSessionEnv` for cwd-scoping and `createScopedEnv` for command-injection scoping. This is the abstraction that makes the rest of the SDK sandbox-blind, and it's the load-bearing piece of "runtime-agnostic."
+A call with `result: v.object(...)` starts a second prompt that gets the result
+(`result.ts`). If the result does not agree with the schema, Flue tries again.
 
-## 5. Tool Surface
+<a id="4-sandbox-substrate-sessionenv"></a>
 
-_`agent.ts`, `mcp.ts`, `command-helpers.ts` + `node/define-command.ts`, `cloudflare/define-command.ts`_
+## 4. The sandbox layer: `SessionEnv`
 
-What the LLM can actually do. Four sources, all unified at the pi-agent-core `AgentTool[]` boundary:
+_`types.ts`, `sandbox.ts`, `env-utils.ts`, `cloudflare/cf-sandbox.ts`,
+`cloudflare/virtual-sandbox.ts`_
 
-- **Built-ins** (`createTools`) — `read / write / edit / bash / grep / glob / task`. Deliberately mirrors Claude Code's tool surface so prompts port over.
-- **Custom `ToolDef`s** — typed (TypeBox/JSON Schema), agent-wide via `init({ tools })` or per-call. Validated against `BUILTIN_TOOL_NAMES` for collisions.
-- **`Command`s** — CLI shims registered into just-bash for the duration of a call. Lets the LLM invoke `gh`, `npm`, etc., without leaking host secrets. Platform-specific `defineCommand` factories adapt host CLIs into the Command interface.
-- **MCP** — `connectMcpServer` discovers tools from an MCP server and yields `ToolDef`s the SDK already knows how to register.
+`SessionEnv` is one interface that each type of sandbox supplies. It holds
+`exec`, `readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm`, `cwd`,
+`resolvePath`, `scope` and `cleanup`. This interface is the most important part
+that lets Flue run on each runtime. The other parts of the SDK do not know which
+sandbox they use.
 
-## 6. Context & Behavior Layer
+Flue has four adapters for this interface:
+
+- **Empty (`virtual`).** A `just-bash` shell in memory, with no access to the
+  host. This is the default. It uses a small number of resources and it is fast.
+  Thus it is good for agents that get many requests.
+- **Local.** The filesystem of the host at `/workspace`. Only Node has it.
+- **`BashFactory`.** A function of the user gives new `Bash` shells. The shells
+  use the same filesystem through a closure.
+- **`SandboxFactory`.** External sandboxes through one adapter point, for
+  example Daytona, Cloudflare Containers and Vercel.
+
+`createCwdSessionEnv` gives a `SessionEnv` that can use only one folder.
+`createScopedEnv` gives a `SessionEnv` with the commands of one call.
+
+<a id="5-tool-surface"></a>
+
+## 5. The tools
+
+_`agent.ts`, `mcp.ts`, `command-helpers.ts`, `node/define-command.ts`,
+`cloudflare/define-command.ts`_
+
+The tools are the operations that the LLM can do. They come from four sources.
+At the boundary of `pi-agent-core`, all the tools become one `AgentTool[]` list.
+
+- **The tools of Flue** (`createTools`): `read`, `write`, `edit`, `bash`,
+  `grep`, `glob` and `task`. They are the same as the tools of Claude Code by
+  decision. Thus a prompt operates in the two systems.
+- **Your `ToolDef`s.** Each `ToolDef` has a type in `TypeBox` or JSON Schema.
+  You add it for all the agent with `init({ tools })` or for one call. Flue
+  compares its name with `BUILTIN_TOOL_NAMES`. Thus two tools cannot have the
+  same name.
+- **`Command`s.** Small CLI adapters that Flue adds to `just-bash` during one
+  call. They let the LLM run `gh`, `npm` and other CLIs, and the secrets of the
+  host stay on the host. A `defineCommand` function for each platform changes a
+  CLI of the host into a `Command`.
+- **MCP.** `connectMcpServer` finds the tools of an MCP server and gives
+  `ToolDef`s that the SDK can add.
+
+<a id="6-context--behavior-layer"></a>
+
+## 6. The context layer
 
 _`context.ts`, `roles.ts`, `internal.ts::resolveModel`_
 
-The markdown-as-logic system. Three things get discovered/resolved at session-init time, all from inside the sandbox cwd (not the bundle):
+This component keeps the instructions of the agent in Markdown. When the Session
+starts, Flue finds the system prompt and the skills in the sandbox. It finds
+them in the folder of the Session, not in the output of the build. The build
+puts the roles into the output.
 
-- **System prompt** — `AGENTS.md` (and `CLAUDE.md` if present), concatenated.
-- **Skills** — `.agents/skills/<name>/SKILL.md` with YAML frontmatter (`name`, `description`); body becomes a structured prompt template invokable as `session.skill(name, { args, result })`. Path-based fallback supports orchestration packs (parent SKILL.md + sibling stage files).
-- **Roles** — `roles/*.md` (build-time, bundled). Frontmatter can pin a `model`. Roles compose into `<role name="...">…</role>` system-prompt blocks.
+- **System prompt.** `AGENTS.md`, and then `CLAUDE.md` if the project has it.
+- **Skills.** Each skill is a `.agents/skills/<name>/SKILL.md` file. Its
+  frontmatter gives the `name` and the `description`. Its text after the
+  frontmatter becomes a prompt with a structure. You call it with
+  `session.skill(name, { args, result })`. Flue can also find a skill by its
+  path. Thus a skill can have a top `SKILL.md` file and one file for each step
+  in the same folder.
+- **Roles.** Each role is a `roles/*.md` file that the build puts into the
+  output. Its frontmatter can select a `model`. Each role becomes a
+  `<role name="...">…</role>` block of the system prompt.
 
-Plus the **model/role/provider precedence chain**: `per-call > role > agent default`, with `ProvidersConfig` (baseUrl/headers/apiKey) merged the same way. `pi-ai::getModel` resolves `provider/model-id` strings; the `applyProviderSettings` helper makes gateway routing first-class.
+Flue selects the model, the role and the provider in this sequence:
 
-## 7. Persistence & Compaction
+1. the value of the call
+2. the value of the role
+3. the default value of the agent.
 
-_`session-history.ts`, `compaction.ts`, `cloudflare/session-store.ts`, `InMemorySessionStore`_
+`ProvidersConfig` (`baseUrl`, `headers`, `apiKey`) uses the same sequence.
+`pi-ai::getModel` finds the model from a `provider/model-id` string. The
+`applyProviderSettings` function lets you send all model calls through a server
+between the agent and the providers.
 
-Stateful conversations. `SessionData` is versioned (`version: 2`) and built from typed `SessionEntry` records — `message | compaction | branch_summary` — with `parentId` linkage forming an active path through history (branching is a primitive, not bolted on). Two backends: in-memory on Node, Durable Object SQLite on Cloudflare (so a session resumes on the same DO weeks later). `compaction.ts` wires in two trigger modes: **threshold** (tokens exceed `contextWindow - reserveTokens`) and **overflow** (provider returned context-overflow → compact + auto-retry). Older messages get summarized into a `compaction` entry; recent N tokens preserved.
+<a id="7-persistence--compaction"></a>
 
-## 8. Developer Toolchain
+## 7. Storage and compaction
 
-_`packages/cli/bin/flue.ts`, `dev.ts`, `connectors/_.md`, `scripts/generate-connector-index.ts`\*
+_`session-history.ts`, `compaction.ts`, `cloudflare/session-store.ts`,
+`InMemorySessionStore`_
 
-The thin outer shell. CLI exposes `dev / run / build / add`. The interesting piece is `dev.ts`: it implements **two fundamentally different reload models** because the targets are fundamentally different — Node has no host bundler, so dev does the esbuild itself and respawns the child on every change; Cloudflare delegates to wrangler's own watcher and only re-acts on _structural_ changes (agent set or `wrangler.jsonc` edits), letting wrangler hot-reload bodies. The **connector system** (`flue add`) is the most unusual component: extensibility is implemented by piping a markdown spec to a coding agent (Claude/Codex/etc.) which writes the connector code into the user's project. Connectors aren't a runtime plugin API — they're a _prompt-to-an-agent_ API.
+This component keeps the conversations. `SessionData` has a version
+(`version: 2`). It holds `SessionEntry` entries with a type: `message`,
+`compaction` or `branch_summary`. Each entry has a `parentId` that connects it
+to the entry before it. These connections make an active path through the
+history. Thus the format has branches as a basic part.
+
+Flue has two backends for storage:
+
+- on Node, the memory of the process
+- on Cloudflare, the SQLite database of a Durable Object. A Session can continue
+  on the same Durable Object after some weeks.
+
+`compaction.ts` starts a compaction in two modes:
+
+- **At the limit.** The tokens are more than `contextWindow - reserveTokens`.
+- **After an error.** The provider gives an error because the context is too
+  large. Flue does a compaction and tries the call again automatically.
+
+A compaction changes the messages before them into one short `compaction` entry.
+It keeps the last `N` tokens.
+
+<a id="8-developer-toolchain"></a>
+
+## 8. The developer toolchain
+
+_`packages/cli/bin/flue.ts`, `dev.ts`, `connectors/*.md`,
+`scripts/generate-connector-index.ts`_
+
+This component is the thin outer shell. The CLI has the commands `dev`, `run`,
+`build` and `add`.
+
+`dev.ts` has two different methods to load changed code again, because the two
+targets are very different:
+
+- Node has no tool that makes a bundle. Thus `dev` runs `esbuild`. After each
+  change, `dev` stops the server process and starts it again.
+- On Cloudflare, `dev` lets `wrangler` find the changes. `dev` changes the entry
+  only when the structure changes: when you add or remove an agent, or when you
+  change `wrangler.jsonc`. If you change only the code of an agent, `wrangler`
+  loads the new code.
+
+The connector system (`flue add`) is the most unusual component. Flue sends a
+Markdown specification to a coding agent, for example Claude or Codex. The
+coding agent writes the code of the connector into the project of the user. Thus
+a connector does not come from a plugin API of the runtime. It comes from a
+prompt to an agent.
 
 ---
 
-## How they fit together
+<a id="how-they-fit-together"></a>
+
+## How the components connect
 
 ```
 Build Pipeline (1)            Dev Toolchain (8)
@@ -95,4 +247,20 @@ Runtime Entry (2) ── builds ──▶ FlueContext
                     Persistence & Compaction (7)
 ```
 
-Reading this top-down: **(1)+(8) are compile/dev-time, (2) is the deploy boundary, (3) is the runtime nucleus, and (4)–(7) are the four orthogonal axes the harness composes over** — _where things run_ (sandbox), _what the LLM can do_ (tools), _how it behaves_ (context), and _what it remembers_ (persistence). Every feature in Flue lives on exactly one of those axes, which is why the framework stays small despite covering a lot of surface.
+Read this structure from the top:
+
+- Components 1 and 8 operate when you write and compile the agent.
+- Component 2 is the boundary that you deploy.
+- Component 3 is the core of the runtime.
+- Components 4 to 7 are the dimensions of the harness. Each dimension changes
+  and the other dimensions stay the same.
+
+The dimensions are these:
+
+- the sandbox: where the work occurs
+- the tools: the operations that the LLM can do
+- the context: how the agent operates
+- the storage: the data that the agent keeps.
+
+Each function of Flue is in one of these dimensions. Thus the framework stays
+small, but it has many functions.

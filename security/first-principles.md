@@ -1,108 +1,403 @@
 # First Principles
 
-Agent security decomposes into two orthogonal axes. Most engineering and most vendor marketing conflate them; conflating them is the source of nearly every wrong design decision in the field.
+Agent security has two different problems, and they are not connected. The first
+problem is process authority: the operations that the operating system lets the
+agent process do. The second problem is agent authority: the operations that the
+agent can do in other services with the credentials that you gave it. A defense
+for one problem does not stop the attacks of the other problem. Most engineers
+and most texts of companies about their products do not keep the two problems
+apart. This error causes almost each incorrect decision about agent security.
 
-## The Two Axes
+<a id="the-two-axes"></a>
 
-**Process authority.** What the operating system lets the agent's process do. The agent runs `rm -rf /`, eats the host filesystem, runs up a cloud bill in a recursive loop, fork-bombs the machine, exfiltrates `~/.ssh/id_rsa` via shell redirection. This is a containment problem and is what classical OS isolation tools — containers, VMs, microVMs, language sandboxes — were designed to address. See the variants in [Environment](../environment/environment.md).
+## Two different problems
 
-**Agent authority.** What the agent's identity is allowed to do in upstream services. The agent legitimately holds your GitHub token because that is its job. An attacker plants an instruction inside a GitHub issue body. The agent reads the issue, follows the instruction, opens a backdoored pull request. The egress is a normal, signed `git push` originating from inside whatever sandbox you put the agent in. **No process boundary blocks this** — the authority crosses the boundary by design, as a capability the agent must have to function.
+### Process authority
 
-The two axes are independent. Containment failure can occur with no agent-authority misuse (e.g., a runaway loop). Agent-authority misuse can occur inside a perfectly contained sandbox (e.g., the Replit production-database deletion of July 2025; see [References § Replit production DB deletion](references.md#replit-production-db-deletion)). A defense designed for one axis does not transfer to the other.
+Process authority is the set of operations that the operating system lets the
+agent process do. With too much process authority, an agent can do these
+operations:
 
-The remainder of this document is about agent authority. Process authority is well understood at the systems-engineering level — the [Architecture](architecture.md) document gives the operational ladder for sandbox tiers — but it is the easier of the two problems and the one the field already knows how to engineer.
+- Run `rm -rf /`.
+- Fill or erase the filesystem of the host.
+- Use a large quantity of cloud resources in a loop that does not stop.
+- Start new processes until the computer stops.
+- Send `~/.ssh/id_rsa` to an attacker through the shell.
 
-## The Lethal Trifecta
+The tools of the operating system that isolate processes are the solution to
+this problem: containers, virtual machines, microVMs and language sandboxes.
+Engineers made these tools for this problem.
+[Environment](../environment/environment.md) gives these variants.
 
-The cleanest framing of agent-authority risk is Simon Willison's _lethal trifecta_: an agent has it when all three properties hold simultaneously.
+### Agent authority
 
-1. **Access to private data** — the agent can read information the attacker wants to obtain (your inbox, files, credentials, internal documents).
-2. **Exposure to untrusted content** — the agent reads input the attacker controls (a webpage, an email body, a GitHub issue, a Jira ticket, a PDF, the return value of an MCP tool, a RAG document).
-3. **Ability to communicate externally** — the agent can produce output that reaches a network destination (HTTP request, email, message in a channel, file written to a shared location, link rendered in a UI).
+Agent authority is the set of operations that the agent can do in other services
+with its credentials. For example, an agent has your GitHub token, because its
+task is to change your repository:
 
-If all three hold, exfiltration is achievable; the only reliable defense is _structural_ — sever one leg by architecture, not by hoping the model resists. An agent with any two of the three is bounded by the missing leg; an agent with all three is bounded only by model behavior, and model behavior is empirically not reliable enough to be the boundary.
+1. An attacker writes an instruction in the text of a GitHub issue.
+2. The agent reads the issue and obeys the instruction.
+3. The agent opens a pull request that contains a backdoor.
 
-This reduces to a non-interference question. The classical formulation is information-flow control: untrusted-source data must not influence high-confidentiality sinks. Cutting a leg of the trifecta is the same as cutting the path between source and sink — and you can do it at design time, by construction, rather than at runtime, by hoping.
+The pull request goes out through a usual `git push` with a correct signature,
+from the sandbox of the agent. **No process boundary stops this.** The authority
+goes across the boundary because the agent cannot do its task without it.
 
-See [References § The lethal trifecta](references.md#the-lethal-trifecta).
+### The two problems are not connected
 
-## What Sandboxes Actually Solve
+Process authority can cause damage without agent authority, for example in a
+loop that does not stop. Agent authority can cause damage in a sandbox that
+isolates the process fully. An example is the Replit incident (2025-07): an
+agent erased a database that customers used. See
+["Replit production DB deletion"](references.md#replit-production-db-deletion).
+A defense for one problem does not help with the other problem.
 
-Sandboxes — containers, microVMs, language sandboxes, gVisor, ephemeral cloud sandboxes — solve process authority. They constrain what the agent's _process_ can reach in the operating system. They are necessary infrastructure for any agent that executes code.
+Process authority is the easier problem, and engineers know a good solution for
+it. [Architecture](architecture.md) gives the levels of sandboxes for it. Thus,
+after this section, this document examines only agent authority.
 
-They do not solve agent authority. Three lines of evidence make this concrete.
+<a id="the-lethal-trifecta"></a>
 
-**Authority crosses the boundary by construction.** A sandboxed coding agent that pushes to GitHub must hold the GitHub token _inside_ the sandbox. A sandboxed email agent must hold IMAP credentials. The sandbox boundary is permeable to exactly the capabilities the agent needs — and to whatever an attacker can steer the agent into doing with those capabilities. The legitimate egress (git push, SMTP, signed API call) is byte-identical to the malicious egress.
+## The lethal trifecta
 
-**Confused-deputy attacks are sandbox-invariant.** The agent acts on behalf of the user but is steered by a third party who controls some content the agent reads. The original demonstration in production was Bargury et al.'s "Living off Microsoft Copilot" (Black Hat USA 2024), which exfiltrated tenant data through a benign user's Copilot using documents shared by an attacker. The agent had legitimate access to the data; the user had legitimate access to the data; the attacker did not — and yet the attacker drove the egress. Sandbox is irrelevant; the agent has legitimate access. See [References § Living off Microsoft Copilot](references.md#living-off-microsoft-copilot).
+The lethal trifecta of Simon Willison is the best description of the risk of
+agent authority. An agent has the lethal trifecta when it has all of these
+properties at the same time:
 
-**The output is the attack vector.** The model's reply is the payload. Markdown-image rendering with attacker-controlled URLs encodes data into query strings; misleading code summaries omit malicious diff lines; hyperlinks that look benign point to phishing endpoints. The user trusts the agent's output; the attacker controls what the agent says. No process sandbox addresses output manipulation.
+1. **Access to private data.** The agent can read the data that the attacker
+   wants: your email, your files, your credentials or internal documents.
+2. **Access to untrusted data.** The agent reads input that the attacker
+   controls. Examples are a web page, the text of an email, a GitHub issue and a
+   Jira task. Other examples are a PDF, the output of an MCP tool and a RAG
+   document.
+3. **A path for data to go out.** The agent can make output that goes to a
+   location on the network. Examples are an HTTP request, an email and a message
+   in a channel. Other examples are a file in a location that other persons can
+   read, and a link that a user interface shows.
 
-The general statement: **sandboxes answer "can the agent's process do bad things in the host?" They do not answer "can the agent be tricked into doing bad things using authority I gave it?"** These are different questions. Treating sandbox isolation as the answer to the second is the modal misdiagnosis.
+If an agent has all three properties, exfiltration is possible. Then the only
+safe defense is structural: the architecture of the agent must remove one
+property. Do not think that the model will not obey the attacker. Without one
+property, the agent cannot do the full attack. With all three properties, only
+the model is a limit to the attack. Tests show that the model does not stop all
+attacks, thus it cannot be that limit.
 
-## Why Prompt Injection Is Architecturally Unsolved at the Model Layer
+The lethal trifecta is a problem of information flow control. In information
+flow control, untrusted data must not change the data that goes to a private
+sink. When you remove one property of the lethal trifecta, you cut the path
+between the source and the sink. You can do this before the system runs. That is
+better than to think that the model will stop the attack when it runs.
 
-This is the load-bearing claim in the field. SQL injection was solved by parameterized queries — the prepared statement is a typed boundary between _instruction_ (the SQL skeleton) and _data_ (bound parameters), and the database engine enforces that boundary at parse time. The boundary is structural; the parser cannot confuse one for the other.
+See ["The lethal trifecta"](references.md#the-lethal-trifecta).
 
-Large language models have no such boundary. The transformer's input is one undifferentiated token stream. The decision "is this token an instruction or data?" is made _by the same forward pass that follows the instruction_. There is no syntactic, type-system, or runtime mechanism to distinguish privileged from unprivileged tokens — only learned correlations.
+<a id="what-sandboxes-actually-solve"></a>
 
-As long as that holds, defense at the model layer is asymptotic, not absolute. Adversarial training can move per-attempt success rates from above fifty percent toward single-digit percent. It cannot reach zero. The mechanism that would make it reach zero — a parser-level distinction between instruction and data — does not exist in current architectures.
+## The problem that sandboxes stop
 
-This conclusion is not contested by frontier labs. OpenAI's CISO publicly stated (October 2025, in announcing hardening for the Atlas browser) that prompt injection is "unlikely to ever be fully solved" with current model architectures. Anthropic's Opus 4.5 system card frames prompt injection as the central unsolved threat for agentic AI. DeepMind's CaMeL paper (March 2025) — the most rigorous published architectural defense — explicitly states its goal is "defeating prompt injections by design" _because training-based defenses are insufficient_. The labs that ship the models converge on the same answer.
+Sandboxes are the solution to the problem of process authority. They set the
+parts of the operating system that the agent process has access to. Examples are
+containers, microVMs, language sandboxes, gVisor and temporary cloud sandboxes.
+Each agent that runs code must have a sandbox.
 
-The compounding problem at scale: per-attempt success rate is the wrong unit. Recent red-team data on Claude Opus 4.5 (November 2025): one strong attack succeeds with probability around four to five percent, ten attempts succeed with probability around thirty-three percent, one hundred attempts succeed with probability around sixty-three percent. Frontier models from other vendors hit ninety percent under similar conditions. For an autonomous agent processing thousands of untrusted documents per day, the relevant metric is the compounded probability — and it converges to certain compromise within hours at non-trivial per-attempt rates. A defense that takes the per-attempt rate from fifty percent to one percent is real progress and yet still not enough.
+Sandboxes are not the solution to the problem of agent authority. These facts
+show it.
 
-See [References § Frontier model red-team results](references.md#frontier-model-red-team-results), [§ AgentDojo](references.md#agentdojo), and [§ AgentHarm](references.md#agentharm).
+### Authority goes across the boundary
 
-## Indirect Injection Is the Operational Threat
+A coding agent in a sandbox that pushes to GitHub must keep the GitHub token in
+the sandbox. An email agent in a sandbox must keep its IMAP credentials. Thus
+the sandbox boundary lets through the authority that the agent must have. It
+also lets through each operation that an attacker can make the agent do with
+this authority. The correct output has the same bytes as the output of an
+attack. Examples of this output are a `git push`, an SMTP message and an API
+call with a signature.
 
-Prompt injection has two flavors. They are not equally severe.
+### A confused deputy attack occurs in each sandbox
 
-**Direct injection** — the user is the attacker, pasting hostile instructions to bypass refusals. This is jailbreaking. Annoying, rarely catastrophic; the blast radius equals the user's own privileges, and user-against-self is not an interesting threat model in most agent deployments.
+In a confused deputy attack, the agent operates for the user, but a different
+person controls the agent. That person controls some data that the agent reads.
+The first example in a system that customers used was "Living off Microsoft
+Copilot" by Bargury and other authors, at Black Hat USA 2024:
 
-**Indirect injection** (Microsoft's term: XPIA, Cross-Prompt Injection Attempt) — the attacker controls _content the agent reads as part of its task_. The user is benign. The attacker is some third party who wrote an email, a webpage, a GitHub issue, a Jira ticket, a Slack message, a RAG document, a tool description, a URL fragment. The agent loads attacker-controlled bytes into the same context window where it makes tool-calling decisions, and those bytes contain operational instructions.
+1. An attacker gave documents to a usual user.
+2. These documents controlled the Copilot of the user.
+3. The Copilot sent private data of the organization to the attacker.
 
-For autonomous agents, indirect injection is the dominant threat. Reasons:
+The agent and the user had correct access to the data. The attacker did not have
+access, but the attacker controlled the exfiltration. The sandbox has no effect
+here, because the agent has correct access. See
+["Living off Microsoft Copilot"](references.md#living-off-microsoft-copilot).
 
-- **Privilege escalation primitive.** The user has tools and credentials. The attacker has neither. Indirect injection is the bridge that takes the attacker's instructions and runs them with the user's authority.
-- **Attack surface is everything the agent reads.** A coding agent reads `package.json` scripts, dependency READMEs, GitHub issues, CI logs, branch configurations. A browser agent reads every DOM it lands on. An email assistant reads every inbound email. None of those sources are authenticated as instructions.
-- **Zero user interaction.** The June 2025 EchoLeak vulnerability in Microsoft 365 Copilot (CVE-2025-32711) was a _zero-click_ exfiltration: an attacker sent a single crafted email; the victim never clicked anything; tenant data left the boundary. See [References § EchoLeak](references.md#echoleak).
-- **Composability.** Indirect injection chains with everything: tool use, browsing, persistent memory, supply-chain compromises. One injected sentence in one untrusted source can pivot through the agent's whole capability surface.
+### The output of the model is the attack
 
-NIST and OWASP both rank indirect prompt injection as the top LLM-application threat as of 2025.
+The reply of the model is the payload. The user thinks that the output of the
+agent is correct, and the attacker controls the output. Examples:
 
-## The Supply-Chain Compounding
+- A Markdown image has a URL of the attacker. The data goes to the attacker in
+  the query string of the URL.
+- A short description of code does not show the dangerous lines of a diff.
+- A link that looks safe goes to a web page that tells you to write your
+  password.
 
-Every dependency edge an agent has — package, MCP server, skill, plugin, system-prompt fragment, RAG document — is a _prompt-injection edge_.
+No process sandbox stops an attacker who changes the output.
 
-This is the conceptual shift: classical software supply chain treats the threat as _hostile bytes executed as code_ and addresses it with provenance, signing, lockfiles, reproducibility. In an agent context, the payload is _natural language_, and the execution surface is the model's context window. Code-signing a `SKILL.md` does not tell you whether its instructions are honest. Lockfiles do not protect against an MCP server's tool descriptions being silently rewritten after install.
+### Two different problems
 
-Specific vectors as of 2026:
+Sandboxes are the solution to the first of these problems, but not to the
+second:
 
-- **MCP servers.** The Model Context Protocol's default trust model is none. A user installs a binary that holds credentials and proxies tool calls; the protocol does not require signing, sandboxing, or capability scoping. Multiple CVEs in the second half of 2025 and early 2026 (MCP Inspector RCE, LibreChat, the STDIO-transport architectural RCE pattern) reflect that protocol-level controls are minimal. Tool poisoning — malicious instructions embedded in the server's tool descriptions, which the LLM reads — and rug-pulls — a server changing tool definitions post-trust — are documented unfixed-at-protocol-level attack classes. See [References § MCP architectural RCE](references.md#mcp-architectural-rce) and [§ Tool poisoning attacks](references.md#tool-poisoning-attacks).
-- **Agent skill marketplaces.** Claude Code skills, Cursor rules, OpenAI custom GPTs, Hermes-style "fetch skill from arbitrary GitHub repo." A 2025 Snyk audit reported that thirty-six percent of scanned community skills contained prompt injection. February 2026 saw over a thousand malicious skills surfaced in a single agent marketplace.
-- **npm/pip-style typosquatting in agent contexts.** February 2026's SANDWORM_MODE campaign deployed nineteen-plus malicious npm packages impersonating dev and AI tools; on install they deployed an MCP server that used indirect prompt injection against the developer's AI assistant to harvest SSH keys, cloud credentials, and npm tokens. Indirect injection fused with classical supply chain: the malicious package does not need to escalate by itself — it whispers to the agent.
+- "can the agent's process do bad things in the host?"
+- "can the agent be tricked into doing bad things using authority I gave it?"
 
-Provenance and signing are still necessary for the byte-level integrity of these dependencies. They do not address the natural-language payload. The supply-chain layer of an agent system needs _content auditing for prompt-injection payloads_ in addition to classical software-supply-chain controls.
+The most frequent error is to use a sandbox as the solution to the second
+problem.
 
-## What This Implies for the Theory
+<a id="why-prompt-injection-is-architecturally-unsolved-at-the-model-layer"></a>
 
-The theory's existing concepts cover the substrate cleanly:
+## The model cannot stop prompt injection
 
-- [Environment](../environment/environment.md) is the place sandboxing goes. The sandbox tier ladder (local OS → container → microVM → language sandbox) is a refinement of Environment variants, not a new concept. The [Architecture](architecture.md) document treats it as such.
-- [Guardrail](../harness/guardrail.md) is the place tool-call interception goes. Deterministic policies that refuse a tool call when its arguments derive from untrusted sources, or require user confirmation, are Guardrail policies in the formal sense.
-- [Topology](../patterns/topology.md) is where planner/executor splits, dual-LLM, and capability-attenuated subagents go. These are not new tiers; they are recognized arrangements.
+The model layer cannot fully stop prompt injection, because the input of an LLM
+has no boundary between instructions and data. This is the most important fact
+of agent security.
 
-Two observations follow from putting it together:
+### SQL has a boundary between instructions and data
 
-**Sandboxing and Guardrails compose, they do not substitute.** Environment-level sandboxing bounds process authority. Guardrails bound agent authority by intercepting tool calls. Both are necessary; neither is sufficient alone. Most production stacks today over-invest in the first and under-invest in the second.
+Queries with parameters stop SQL injection. A prepared query has a boundary
+between the instruction and the data, and each part has its type. The
+instruction is the text of the SQL query, and the data is the parameters. The
+database applies that boundary when it parses the query. The boundary is
+structural. Thus the parser cannot mix the instruction and the data.
 
-**Securing data flow into tool arguments is a Guardrail responsibility.** When the architecture defenses in CaMeL or Fides refuse a tool call because its arguments carry an unacceptable integrity label, that is a Guardrail policy informed by information-flow tracking. The hook point is the harness's `pre` interception; the policy is "deny if arguments derive from untrusted sources and tool sink is high-confidentiality." The structural mechanism already exists in the theory; what is novel is the policy.
+### An LLM has no boundary between instructions and data
 
-The architectural moves the field is converging on — capability-tagged dataflow, plan-first execution, dual-LLM patterns — are compositions of existing harness, environment, and pattern concepts driven by the threat model in this document. They do not require new tiers; they require richer Guardrail policies and explicit Topology constraints.
+The input of an LLM is one sequence of tokens, and all the tokens are of the
+same type. The LLM uses one operation to obey an instruction and to find if a
+token is an instruction or data. No syntax, type system or runtime mechanism
+shows which tokens have more authority. Only the patterns that the model got
+from its training show this.
+
+Thus a defense in the model can make the risk small, but it cannot make the risk
+zero. Training against attacks can decrease the risk of each attack from more
+than 50 percent to less than 10 percent. For a risk of zero, a parser must
+identify the instructions and the data. The architectures of the models of this
+time do not have this mechanism.
+
+### The companies that make the models agree
+
+The companies that make the models give the same result:
+
+- OpenAI told in public that prompt injection is "unlikely to ever be fully
+  solved" with the model architectures of this time. Its head of information
+  security wrote this in 2025-10, when OpenAI made the Atlas browser safer.
+- The Opus 4.5 system card of Anthropic calls prompt injection the primary risk
+  for agents that no company can fully remove.
+- The CaMeL paper of DeepMind (2025-03) is the most careful published defense
+  with architecture. The paper wants to give "defeating prompt injections by
+  design", because defenses from training are not sufficient.
+
+### The risk increases with each attack
+
+The risk of one attack is not the correct value to examine. Attack tests on
+Claude Opus 4.5 (2025-11) show how the risk increases:
+
+| Strong attacks | Risk that one of the attacks gets its result |
+| -------------- | -------------------------------------------- |
+| 1              | 4 to 5 percent                               |
+| 10             | approximately 33 percent                     |
+| 100            | approximately 63 percent                     |
+
+The strongest models of other companies get a risk of 90 percent in the same
+conditions. An agent that operates without a person can read more than 1000
+documents with untrusted data in 24 hours. For this agent, the correct value to
+examine is the total risk of all the attacks. If the risk of one attack is not
+very small, an attacker will almost always control the agent in some hours. A
+defense that decreases the risk from 50 percent to 1 percent is a good result,
+but it is not sufficient.
+
+See [Attack tests](references.md#frontier-model-red-team-results),
+[AgentDojo](references.md#agentdojo) and [AgentHarm](references.md#agentharm).
+
+<a id="indirect-injection-is-the-operational-threat"></a>
+
+## Indirect prompt injection is the primary risk
+
+Prompt injection has two types, and they are not equally dangerous. For an agent
+that operates without a person, indirect prompt injection is the primary risk.
+
+### Direct prompt injection
+
+In direct prompt injection, the user is the attacker. The user writes dangerous
+instructions to go around the safety rules of the model. This is a jailbreak. It
+causes problems, but large damage from it is not frequent. The damage is equal
+to the permissions of the user. In most agent systems, an attack of the user on
+the user is not an important threat model.
+
+### Indirect prompt injection
+
+In indirect prompt injection, the attacker controls data that the agent reads as
+part of its task. Microsoft calls it "XPIA" ("Cross-Prompt Injection Attempt").
+The user is not the attacker. The attacker is a different person who wrote some
+text that the agent reads:
+
+- an email or a web page
+- a GitHub issue, a Jira task or a Slack message
+- a RAG document, a tool description or a part of a URL.
+
+The agent reads this text into the same context window where it selects its tool
+calls. The text contains instructions for the agent.
+
+### The causes of the risk
+
+Indirect prompt injection is the primary risk for these causes:
+
+- **It gives the authority of the user to the attacker.** The user has tools and
+  credentials. The attacker has no tools and no credentials. Indirect prompt
+  injection runs the instructions of the attacker with the authority of the
+  user.
+- **The attack surface is all the data that the agent reads.** A coding agent
+  reads the scripts of `package.json`, the `README` files of dependencies,
+  GitHub issues, CI logs and the configuration of branches. A browser agent
+  reads each page that it opens. An email assistant reads each email that it
+  gets. No source of these is a known source of instructions.
+- **The user does not do an operation.** EchoLeak was a security problem of
+  Microsoft 365 Copilot (2025-06, `CVE-2025-32711`). An attacker sent one email
+  with special text. The user did not open a link, but the private data of the
+  organization went to the attacker. See [EchoLeak](references.md#echoleak).
+- **It connects with each other function of the agent.** Indirect prompt
+  injection adds to tools, web pages, [Memory](../patterns/memory.md) and supply
+  chain attacks. One sentence in one source of untrusted data can go through all
+  the functions of the agent.
+
+In 2025, NIST and OWASP put indirect prompt injection first in their lists of
+risks for LLM programs.
+
+<a id="the-supply-chain-compounding"></a>
+
+## The supply chain
+
+Each dependency of an agent is a path for prompt injection. Examples are a
+package, an MCP server, a skill, a plugin, a part of the system prompt and a RAG
+document.
+
+### The payload is natural language
+
+In usual software, a supply chain attack sends dangerous bytes that run as code.
+The defenses are data about the source of each package, signatures, lockfiles
+and builds that give the same result each time. In an agent, the payload is
+natural language, and it runs in the context window of the model. A signature on
+a `SKILL.md` file does not tell you if its instructions are good. A lockfile
+does not stop an MCP server that changes its tool descriptions after you install
+it, and does not tell you about the change.
+
+The usual defenses are necessary. They make sure that the bytes of each
+dependency are correct. But they do not stop a payload in natural language. Thus
+the supply chain of an agent system must have two types of defense:
+
+- The usual defenses of the software supply chain.
+- A check of the text of each dependency for prompt injection.
+
+### MCP servers
+
+By default, MCP has no security model for servers. A user installs a program
+that keeps credentials and sends tool calls to other services. MCP does not make
+servers use signatures, sandboxes or limits on their authority. Many CVEs from
+the second half of 2025 and from the start of 2026 show that MCP has a small
+number of security controls:
+
+- the RCE in MCP Inspector
+- the RCE in LibreChat
+- the RCE pattern in the STDIO connection of MCP.
+
+MCP has no defense against two known types of attack:
+
+- **Tool poisoning.** A server writes dangerous instructions in its tool
+  descriptions, and the LLM reads them.
+- **Rug pull.** A server changes its tool definitions after the user accepts the
+  server.
+
+See ["MCP architectural RCE"](references.md#mcp-architectural-rce) and
+["Tool poisoning attacks"](references.md#tool-poisoning-attacks).
+
+### Skill marketplaces
+
+Examples of skill marketplaces are Claude Code skills, Cursor rules and OpenAI
+custom GPTs. Hermes Agent can also "fetch skill from arbitrary GitHub repo". In
+2025, Snyk examined skills that users published, and found prompt injection in
+36 percent of them. In 2026-02, persons found more than 1000 dangerous skills in
+one skill marketplace.
+
+### Typosquatting
+
+Typosquatting of npm and pip packages is also an attack on agents. In 2026-02,
+the `SANDWORM_MODE` attack published more than 19 dangerous npm packages:
+
+1. The packages used names that are almost the same as the names of tools for
+   developers and AI tools.
+2. When a developer installed a package, the package started an MCP server.
+3. The MCP server used indirect prompt injection against the AI assistant of the
+   developer.
+4. The assistant sent SSH keys, cloud credentials and npm tokens to the
+   attacker.
+
+This attack is indirect prompt injection in a usual supply chain attack. The
+dangerous package does not get more permissions. It only gives instructions to
+the agent.
+
+<a id="what-this-implies-for-the-theory"></a>
+
+## Security in the theory
+
+Each part of agent security agrees with a concept of the theory:
+
+- A sandbox is a variant of [Environment](../environment/environment.md). The
+  levels of sandboxes are the local operating system, the container, the microVM
+  and the language sandbox. They are variants of Environment, not a new concept.
+  [Architecture](architecture.md) shows them as variants.
+- [Guardrail](../harness/guardrail.md) is the point where the harness stops tool
+  calls. A deterministic policy can stop a tool call if its arguments come from
+  untrusted data. It can also stop the tool call until the user accepts it.
+  These policies are Guardrail policies in the meaning of the theory.
+- [Topology](../patterns/topology.md) contains the known security structures.
+  They are not new tiers:
+  - a Session that makes a plan and a different Session that does the plan
+  - the dual LLM pattern
+  - subagents with a smaller set of tools and permissions.
+
+From these facts, two results follow.
+
+### Sandboxes and Guardrails compose
+
+A sandbox and a Guardrail compose, and one does not replace the other. A sandbox
+in the Environment sets a limit to the authority of the process. A Guardrail
+sets a limit to agent authority, because it stops tool calls. The two are
+necessary, and one of them without the other is not sufficient. Most systems
+that customers use put too much work into the sandbox and not sufficient work
+into the Guardrail.
+
+### The Guardrail controls the data in tool arguments
+
+CaMeL and Fides stop a tool call when the label of its arguments shows data that
+is not safe. That operation is a Guardrail policy that uses information flow
+control. The policy is in the `pre` hook of the harness. The policy is "deny if
+arguments derive from untrusted sources and tool sink is high-confidentiality".
+The theory has the structural mechanism. Only the policy is new.
+
+The field moves to these architectures:
+
+- data with labels that tell which tools can use it
+- a plan before the first tool call
+- the dual LLM pattern.
+
+These architectures are compositions of harness, Environment and pattern
+concepts. The risks of this document cause them. They do not add tiers to the
+theory. They add better Guardrail policies and clear limits in the Topology.
 
 ## Related
 
-- [Architecture](architecture.md) — the operational ladder of sandbox tiers and the architectural defense families.
-- [References](references.md) — papers, vendor publications, CVEs, and incidents cited above.
-- [Environment](../environment/environment.md), [Guardrail](../harness/guardrail.md), [Topology](../patterns/topology.md) — the existing concepts this branch extends with security-specific applications.
+- [Architecture](architecture.md): the levels of sandboxes and the types of
+  defense in the architecture.
+- [References](references.md): the papers, company documents, CVEs and incidents
+  of this document.
+- [Environment](../environment/environment.md),
+  [Guardrail](../harness/guardrail.md) and [Topology](../patterns/topology.md):
+  the concepts that this part of the book applies to security.

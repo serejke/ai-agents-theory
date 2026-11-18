@@ -1,27 +1,60 @@
 # PromptLoading
 
-PromptLoading is the pattern of strategies by which content enters the [Prompt](../primitives/prompt.md). Every piece of knowledge the LLM uses — project conventions, skills, retrieved memory, tool outputs — arrives in the Prompt through some loading strategy: eager at assembly time, lazy on the LLM's request, progressive disclosure, or per-turn dynamic injection.
+The pattern PromptLoading controls when a text goes into the input of the LLM.
+Project rules, skills, facts from memory and tool outputs all go to the LLM
+through the [Prompt](../primitives/prompt.md). Each of them uses one method of
+PromptLoading: at the start, on request of the LLM, in layers, or new in each
+turn.
 
-**Composition**: `source → strategy → Prompt slot`. A source (a file, a function call, a retrieval index, a tool) supplies content; a strategy decides when and how that content enters the Prompt; the Prompt slot (`system`, `messages`, `tools`) is where it lands.
+**Composition**: `source → strategy → Prompt slot`.
 
-## Why It Matters
+The composition has these parts:
 
-The [Prompt](../primitives/prompt.md) is a fixed-size window. Everything going into it competes for the LLM's attention and for context-window capacity. Deciding what loads when — and how — is one of the most consequential design choices in an Agent. Eager-loading everything works until the context window fills up. Lazy-loading scales but requires the LLM to know content exists and to request it. The choice of strategy determines both what the Agent can reason about and how it scales.
+- The **source** gives the text. Examples are a file, a function call, an index
+  and a tool.
+- The **strategy** tells when and how the text goes into the Prompt.
+- The **Prompt slot** is the part of the Prompt that gets the text: `system`,
+  `messages` or `tools`.
 
-This pattern is often mis-named "context injection," which collides with two other meanings of "context": the LLM's input buffer and the active conversation ([Session](../harness/session.md)). PromptLoading is specifically about loading strategies — when content enters the Prompt, not where the content comes from or what it means.
+<a id="why-it-matters"></a>
 
-## Formal Definition
+## Value
+
+The [Prompt](../primitives/prompt.md) cannot be larger than the context window.
+All its contents use space in the context window, and the LLM must divide its
+reasoning between all its contents. Thus the decision about which text loads,
+and when, is one of the most important decisions for an Agent.
+
+The strategy controls these properties of an Agent:
+
+- The text that the Agent can use in its reasoning.
+- The quantity of text that the Agent can have available.
+
+If you load all the text at the start, this operates until the context window is
+full. If the LLM loads the text on request, the Agent can have much more text.
+But then the LLM must know that the text is available, and it must call a tool
+to get it.
+
+This pattern also has the name "context injection." That name is not correct.
+The word context has two other meanings in agent systems: the input of the LLM
+and the active conversation ([Session](../harness/session.md)). This pattern is
+only about the strategy: when a text goes into the Prompt. It is not about the
+source of the text or about its meaning.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
-// A Source produces content that will be placed into a Prompt slot.
-// The result is either raw text, or message-shaped entries (for the `messages` slot).
+// A Source gives the content for one Prompt slot.
+// The result is raw text, or messages (for the `messages` slot).
 type Source = () => string | Message[];
 
 type LoadingStrategy =
-  | "eager" // loaded at Prompt-assembly time, always present
-  | "lazy" // agent pulls via a tool/reference when relevant (Skills)
-  | "progressive" // minimal upfront, expand on request
-  | "dynamic"; // per-turn insert (tool results, retrieved docs)
+  | "eager" // loaded when the Prompt is built, always present
+  | "lazy" // the agent pulls it with a tool or a reference (Skills)
+  | "progressive" // a small part first, more on request
+  | "dynamic"; // added each turn (tool results, retrieved documents)
 
 type PromptLoader = {
   source: Source;
@@ -30,13 +63,22 @@ type PromptLoader = {
 };
 ```
 
-A specific Agent has one or more Loaders configured. Each Loader names a content source, a strategy for when it fires, and which Prompt slot it writes into.
+An Agent has one or more loaders. Each loader gives these items:
 
----
+- The source of the text.
+- The strategy, which tells when the loader adds the text.
+- The Prompt slot that gets the text.
 
-## Strategies
+<a id="strategies"></a>
 
-### Eager — loaded at assembly time
+## The strategies
+
+Each strategy has a name in the `LoadingStrategy` type: `eager`, `lazy`,
+`progressive` and `dynamic`.
+
+<a id="eager--loaded-at-assembly-time"></a>
+
+### `eager`: load at the start
 
 ```typescript
 const claudeMdLoader: PromptLoader = {
@@ -46,43 +88,63 @@ const claudeMdLoader: PromptLoader = {
 };
 ```
 
-Content is loaded when the Prompt is assembled, before the LLM call. Examples: CLAUDE.md, project structure, git status, agent identity, role instructions.
+The harness loads the text when it builds the Prompt, before the LLM call.
+Examples are `CLAUDE.md`, the structure of the project, the `git status`, the
+description of the agent and the instructions for its function.
 
-**Strength**: Guaranteed available. The LLM sees the content from the first turn.
-**Weakness**: Costs tokens on every call, whether or not the content is relevant to the current question. Fills context window capacity linearly.
+- **Strong point**: the text is always available. The LLM sees it from the first
+  turn.
+- **Weak point**: the text uses tokens in each call, also when the task of the
+  turn does not use it. Each new item fills more of the context window.
 
-Eager works while eager content fits comfortably. When it stops fitting, switch strategy.
+Use `eager` while all the `eager` text has sufficient space in the context
+window. When the space is not sufficient, use a different strategy.
 
-### Lazy — loaded on the LLM's request
+<a id="lazy--loaded-on-the-llms-request"></a>
+
+### `lazy`: load on request of the LLM
 
 ```typescript
 const pdfSkill: PromptLoader = {
   source: () => readFile("~/.skills/pdf/SKILL.md"),
   strategy: "lazy",
-  slot: "messages", // appears as a tool result when invoked
+  slot: "messages", // shows as a tool result when the LLM calls it
 };
 ```
 
-Only a pointer (name + description) lives in the Prompt eagerly — often as a tool schema or a short skill listing. The full content loads only when the LLM decides it's needed and invokes a reference (e.g., reads the skill file via a `read` tool).
+At the start, the Prompt holds only a pointer: a name and a description. This
+pointer is usually a tool schema or a short list of skills. The full text loads
+only when the LLM selects it. For example, the LLM reads the skill file with a
+`read` tool.
 
-**Strength**: Scales — the Agent can have hundreds of skills without blowing up the Prompt.
-**Weakness**: The LLM has to recognize when to pull. If the description is weak or the skill is obscurely named, the content won't be loaded even when it would help.
+- **Strong point**: the Agent can have hundred or more skills, and the Prompt
+  stays small.
+- **Weak point**: the LLM must know when to pull the text. The description can
+  be weak, or the name of the skill can be not clear. Then the LLM does not load
+  the text, also when the text can help.
 
-Claude Skills, PI's Skill convention, and Cursor's indexed docs are all lazy PromptLoading — the filesystem or the index holds the content; the Prompt holds only enough to make the LLM pull.
+The skills of Claude, the skill format of PI, and the documents in the index of
+Cursor all use PromptLoading with the `lazy` strategy. The filesystem or the
+index holds the text. The Prompt holds only sufficient text to make the LLM pull
+the full text.
 
-### Progressive disclosure — minimal upfront, expand on request
+<a id="progressive-disclosure--minimal-upfront-expand-on-request"></a>
 
-A variant of lazy loading where content is structured into layers of increasing detail. The first layer is small and eager; deeper layers load on request.
+### `progressive`: load in layers
+
+The `progressive` strategy is a type of the `lazy` strategy. The text has
+layers, and each layer gives more information than the layer before it. The
+first layer is small and loads at the start. The deeper layers load on request.
 
 ```typescript
-// Skill index (eager, tiny) — names + one-line descriptions
+// Skill index (eager, very small): names and one-line descriptions
 const skillIndex: PromptLoader = {
   source: listSkills,
   strategy: "eager",
   slot: "system",
 };
 
-// Full skill content (lazy) — agent reads via `read` tool when needed
+// Full skill content (lazy): the agent reads it with the `read` tool
 const skillContent: PromptLoader = {
   source: readSkill,
   strategy: "lazy",
@@ -90,9 +152,13 @@ const skillContent: PromptLoader = {
 };
 ```
 
-Used when the full content is too big to load eagerly but you want the Agent to know something exists. The eager layer is the "table of contents"; the lazy layer is the "chapter."
+Use this strategy if the full text is too large for the start. With this
+strategy, the Agent knows that the text is available. The first layer is the
+index. The deeper layers are the full text.
 
-### Dynamic — per-turn insert
+<a id="dynamic--per-turn-insert"></a>
+
+### `dynamic`: load new text in each turn
 
 ```typescript
 const retrieveRelevantMemory: PromptLoader = {
@@ -102,39 +168,66 @@ const retrieveRelevantMemory: PromptLoader = {
 };
 ```
 
-Content is freshly gathered each turn based on what the current question is about. Examples: vector-store retrieval (RAG), tool results appended as the Agent runs, just-in-time file reads based on the LLM's requests.
+The harness gets new text in each turn. The task of the turn selects the text.
+Examples:
 
-Dynamic strategies are how [Memory](memory.md) usually enters the Prompt: the memory store is the source, a retrieval function is the strategy, and relevant entries land in `messages` or `system` just before each LLM call.
+- The documents that a vector store finds (RAG).
+- The tool results that the harness adds while the Agent runs.
+- The files that the harness reads when the LLM calls the `read` tool.
 
----
+[Memory](memory.md) usually goes into the Prompt with the `dynamic` strategy.
+The memory store is the source, and a function that finds entries is the
+strategy. The related entries go into `messages` or `system` immediately before
+each LLM call.
 
-## Picking a Strategy
+<a id="picking-a-strategy"></a>
 
-| Content                            | Strategy           | Why                                                      |
-| ---------------------------------- | ------------------ | -------------------------------------------------------- |
-| Agent identity, core instructions  | Eager              | Must be present; small; defines behavior                 |
-| Project conventions (CLAUDE.md)    | Eager              | Small enough; needed every turn                          |
-| Skill library (name + description) | Eager (index only) | Enables the LLM to discover what's available             |
-| Skill content                      | Lazy               | Content is long; only relevant when skill is invoked     |
-| Tool schemas                       | Eager              | Needed so the LLM knows what it can call                 |
-| Tool results                       | Dynamic            | Produced per-turn, injected as they arrive               |
-| Retrieved memory                   | Dynamic            | Query is per-turn; freshly relevant each time            |
-| File contents                      | Lazy or dynamic    | Too big to preload; LLM requests via `read` or retrieval |
+## Select a strategy
 
-The defaults converge because the trade-offs do: eager for small-and-always-needed, lazy for big-and-sometimes-needed, dynamic for fresh-each-turn.
+| Text                             | Strategy            | Cause                                                |
+| -------------------------------- | ------------------- | ---------------------------------------------------- |
+| Description and instructions     | `eager`             | Necessary, small, and it controls the agent          |
+| Project rules in `CLAUDE.md`     | `eager`             | Small, and necessary in each turn                    |
+| List of skills with descriptions | `eager`, index only | It lets the LLM find the available skills            |
+| Text of a skill                  | `lazy`              | Long, and necessary only when the LLM uses the skill |
+| Tool schemas                     | `eager`             | The LLM must know the tools that it can call         |
+| Tool results                     | `dynamic`           | The tools make them in each turn                     |
+| Facts from memory                | `dynamic`           | Each turn has a new query                            |
+| Contents of files                | `lazy` or `dynamic` | Too large for the start                              |
 
----
+For the contents of files, the LLM uses the `read` tool, or a function finds the
+related files.
 
-## PromptLoading vs. Memory
+Many systems make the same selections, because the causes are the same:
 
-[Memory](memory.md) is a content source with persistence semantics (cross-session knowledge). PromptLoading is the strategy by which memory content enters the Prompt — typically dynamic retrieval (the memory store returns entries relevant to the current turn) or eager load (if the memory is small enough to always include, like CLAUDE.md). Memory defines _what_ is stored and _how_ to store/retrieve; PromptLoading defines _when_ the retrieval happens and _where_ the result lands.
+- `eager` for text that is small and always necessary.
+- `lazy` for text that is large and only necessary for some tasks.
+- `dynamic` for text that is new in each turn.
 
----
+<a id="promptloading-vs-memory"></a>
+
+## PromptLoading and Memory
+
+[Memory](memory.md) is a source of text that stays across Sessions. The strategy
+of PromptLoading puts the memory text into the Prompt.
+
+- Memory tells which data the system keeps, and how it keeps and finds the data.
+- PromptLoading tells when the system finds the data and which Prompt slot gets
+  the result.
+
+Memory usually uses one of these strategies:
+
+- `dynamic`: the memory store gives the entries for the task of the turn.
+- `eager`: if the memory is small, the harness loads all of it at the start. An
+  example is `CLAUDE.md`.
 
 ## Related
 
-- [Prompt](../primitives/prompt.md) — what PromptLoading fills
-- [LLM](../primitives/llm.md) — what reads the filled Prompt
-- [Memory](memory.md) — a content source that typically reaches the Prompt via dynamic retrieval
-- [Session](../harness/session.md) — provides message history (an always-eager ingredient of the Prompt)
-- [Workspace](workspace.md) — directory hierarchy as a navigable source for lazy loading (the LLM traverses until it finds what it needs)
+- [Prompt](../primitives/prompt.md): PromptLoading fills it.
+- [LLM](../primitives/llm.md): reads the full Prompt.
+- [Memory](memory.md): a source of text that usually goes into the Prompt with
+  the `dynamic` strategy.
+- [Session](../harness/session.md): gives the history of messages. The history
+  is always an `eager` part of the Prompt.
+- [Workspace](workspace.md): a tree of folders that the LLM can move through
+  until it finds the text. It is a source for the `lazy` strategy.

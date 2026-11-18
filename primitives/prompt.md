@@ -1,26 +1,68 @@
 # Prompt
 
-A Prompt is the structured text input fed into the [LLM](llm.md) for a single call. It carries system instructions, tool schemas, the messages the LLM should see this turn (a snapshot of [Session](../harness/session.md) history plus any pending user input), and any dynamic inserts — all serialized per a provider-specific protocol (Anthropic tool use, OpenAI chat format, raw text, XML tags). The Prompt is what turns "agent state" into something the LLM can actually read.
+A Prompt is the text input that the [LLM](llm.md) reads in one call. It holds
+the instructions of the agent, the tool schemas, the messages of this turn and
+the inserts. Code serializes all of these parts into text in the protocol of the
+provider. Examples are the tool format of Anthropic, the chat format of OpenAI,
+text with special tokens, and XML.
 
-The Prompt is a per-call _view_, not a persistent store. Session owns the conversation history; Prompt borrows it for one call.
+The Prompt changes the condition of the agent into text that the LLM can read.
+The messages of the Prompt are a snapshot of the
+[Session](../harness/session.md) history and the new input of the user. The
+Prompt is a view for one call, not a store of data. The Session keeps the
+history, and the Prompt borrows it for one call.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-The [LLM](llm.md) is fundamentally `string → string`. It doesn't natively understand "tools," "roles," or "tool calls" — it understands tokens. What makes an LLM behave as a tool-using assistant is the Prompt: the text is structured according to a protocol the model was post-trained to recognize. The role tags that tell the LLM "this is a user message vs. assistant message," the JSON blocks that tell it "this is a callable tool," the stop tokens that tell it "end of turn" — all of this is Prompt, not LLM.
+## Value
 
-This matters because the Prompt is where the theory's other concepts cross into the LLM's world. [Session](../harness/session.md) history becomes Prompt messages. [Tool](tool.md) definitions become Prompt tool schemas. System instructions become the Prompt's system block. Dynamic content (files, retrieved memory, skills) enters the Prompt through a [PromptLoading](../patterns/prompt-loading.md) strategy. The Prompt is the common denominator — the shape everything converges into before the LLM runs.
+The Prompt makes an LLM operate as an assistant that uses tools. At its core,
+the [LLM](llm.md) is `string → string`. It does not know "tools", "roles" or
+"tool calls". It knows only tokens. The Prompt gives its text a structure in a
+protocol, and the model knows this protocol from its training. These parts of
+the protocol are in the Prompt, not in the LLM:
 
-Treating Prompt as a primitive (rather than a composition) is deliberate: the protocol structure is not defined by other theory concepts. It's defined by the LLM's training. Our concepts _fill_ Prompt slots; they don't _compose_ into Prompt. Two agents using different provider protocols have different Prompt shapes even if they use identical Sessions and Tools.
+- the role of each message, for example a message from the user or from the
+  assistant
+- the JSON blocks that tell the LLM about a tool that it can call
+- the tokens that tell the LLM to stop at the end of its turn.
 
-## Formal Definition
+### The point where the concepts go into the LLM
+
+The other concepts of the theory go into the LLM through the Prompt. All of them
+change into the same shape before the LLM runs:
+
+- The history of the [Session](../harness/session.md) becomes the messages of
+  the Prompt.
+- The definitions of each [Tool](tool.md) become the tool schemas of the Prompt.
+- The instructions of the agent become the system prompt.
+- With [PromptLoading](../patterns/prompt-loading.md), text from other sources
+  goes into the Prompt. Examples are files, facts from
+  [Memory](../patterns/memory.md) and skills.
+
+### Slots, not a composition
+
+No other concept of the theory gives the structure of the Prompt. Thus the
+Prompt is one of the primitives. The training of the LLM gives this structure.
+The concepts of the theory fill the slots of the Prompt. They do not compose the
+Prompt.
+
+For example, two agents can have the same Session and the same Tools, but use
+different protocols of different providers. Then their Prompts have different
+shapes.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
-// Conceptual shape — protocol-specific serialization produces the actual string
+// The shape that agent code uses. The serialization of the protocol makes
+// the string that the LLM reads.
 type Prompt = {
-  system?: string; // agent identity, instructions, always-loaded context
-  tools?: ToolSchema[]; // callable tools the model should know about
-  messages: Message[]; // per-call snapshot of Session.history plus any pending user input
-  inserts?: string[]; // dynamic content injected per-turn as raw text (retrieved docs, tool results)
+  system?: string; // the agent's identity, instructions and context that is always loaded
+  tools?: ToolSchema[]; // the tools that the model can call
+  messages: Message[]; // a snapshot of Session.history for this call, plus new user input
+  inserts?: string[]; // text added for one turn (found documents, tool results)
 };
 
 type Message =
@@ -32,11 +74,11 @@ type ToolCall = { id: string; name: string; args: Record<string, unknown> };
 
 type ToolSchema = {
   name: string;
-  description: string; // the LLM reads this to decide if/when to call
-  input: JSONSchema; // JSON Schema — standard format; not a theory concept
+  description: string; // the LLM reads this to decide if and when to call the tool
+  input: JSONSchema; // JSON Schema: a standard format, not a theory concept
 };
 
-// Serialization — protocol-specific, defined by the LLM provider
+// Serialization: the LLM provider defines it for each protocol.
 type Protocol = "anthropic" | "openai" | "xml" | "raw-text";
 
 const serialize = (prompt: Prompt, protocol: Protocol): string => {
@@ -44,63 +86,100 @@ const serialize = (prompt: Prompt, protocol: Protocol): string => {
 };
 ```
 
-The actual input to the LLM is always a string (or token sequence). The Prompt's structured form is what agent code manipulates; serialization to the final string is the protocol's job. Provider SDKs usually hide the serialization — you pass structured messages and tools, and the SDK formats them into whatever the model expects.
+The input of the LLM is always a string or a sequence of tokens. The agent code
+changes the Prompt as items with a structure. The protocol serializes these
+items into the last string. Usually the SDK of the provider does this work. You
+give it the messages and the tools, and the SDK puts them into the format of the
+model.
 
----
+<a id="prompt-vs-llm"></a>
 
-## Prompt vs. LLM
+## The Prompt and the LLM
 
-Two things are easily conflated — keep them distinct:
+The Prompt and the LLM are two different concepts. Keep them apart:
 
-| Concept    | What it is                                                                                     |
-| ---------- | ---------------------------------------------------------------------------------------------- |
-| **LLM**    | A stateless function: takes a Prompt, produces a stream of output text.                        |
-| **Prompt** | The structured input: system + tools + history + inserts, serialized to a string per protocol. |
+| Concept    | Function                                                                                                   |
+| ---------- | ---------------------------------------------------------------------------------------------------------- |
+| **LLM**    | A function that keeps no data between calls. It reads a Prompt and gives a stream of output text.          |
+| **Prompt** | The input with a structure: the system prompt, the tools, the history and the inserts, in a protocol text. |
 
-The LLM itself is dumb about structure. Everything structured lives in the Prompt (input) or gets parsed out of the output text stream (on the way back). The output side is not a named concept — it's just text that the [AgentLoop](../harness/agent-loop.md) reads, splitting final content from tool-call-shaped blocks per the same protocol the Prompt used on the way in.
+The LLM does not know the structure of its input or of its output. The structure
+is in the Prompt, or other code parses it from the output text. The theory has
+no concept for the output. The output is only text. The
+[AgentLoop](../harness/agent-loop.md) reads this text and divides the last text
+for the user from the tool calls. It uses the same protocol that the Prompt used
+for the input.
 
----
+<a id="what-goes-in-a-prompt"></a>
 
-## What Goes In a Prompt
+## The parts of a Prompt
 
-A Prompt is assembled each time the LLM is called. The pieces come from different sources:
+The harness makes a new Prompt for each call to the LLM. Each part comes from a
+different source:
 
-| Piece                | Source                                                                                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| System instructions  | Agent configuration — often composed from multiple sources (CLAUDE.md, agent role, phase instructions)                                    |
-| Tool schemas         | The set of Tools the Agent currently exposes                                                                                              |
-| Messages (this turn) | Snapshot of [Session](../harness/session.md).history plus any pending user input                                                          |
-| Dynamic inserts      | Per-turn content injected by a [PromptLoading](../patterns/prompt-loading.md) strategy (retrieved memory, skill expansions, tool outputs) |
+| Part                 | Source                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| System prompt        | The configuration of the agent. Frequently it comes from two or more sources, for example `CLAUDE.md`, the role of the agent and the instructions of a phase. |
+| Tool schemas         | The Tools that the Agent gives to the LLM at this time.                                                                                                       |
+| Messages of the turn | A snapshot of the [Session](../harness/session.md) history and the new input of the user.                                                                     |
+| Inserts              | The text for one turn from [PromptLoading](../patterns/prompt-loading.md), for example facts from Memory, the text of a skill, or tool results.               |
 
-Who fills each slot is a design choice — that's the space [PromptLoading](../patterns/prompt-loading.md) covers. Eager inserts (CLAUDE.md, project structure) go into `system`. Lazy inserts (skills) load on-demand into `messages` or `system`. Per-turn dynamic inserts (retrieved memory, tool results) arrive fresh each call.
+The developer selects the source that fills each slot. The pattern
+[PromptLoading](../patterns/prompt-loading.md) gives these decisions:
 
----
+- At the start: `CLAUDE.md` and the structure of the project go into `system`.
+- On request: a skill goes into `messages` or `system` only when the agent must
+  have it.
+- For each turn: facts from Memory and tool results come new for each call.
 
-## Protocol as the Contract Between LLM and Prompt
+<a id="protocol-as-the-contract-between-llm-and-prompt"></a>
 
-Different LLM providers implement different Prompt protocols:
+## The protocol between the LLM and the Prompt
 
-- **Anthropic**: `system`, `messages[]`, `tools[]` at the API level; tool-call output comes back as `tool_use` blocks.
-- **OpenAI**: `messages[]` with roles (`system`, `user`, `assistant`, `tool`), `tools[]` for function calling; tool-call output in `tool_calls` field.
-- **Raw text / legacy**: some older setups format everything into a single string with special tokens (`<|im_start|>`, etc.).
-- **XML-prompted models**: some models work best with explicit XML tags (`<task>`, `<tool_call>`) in a raw string.
+The training of the LLM sets the protocol that it knows. The Prompt must use
+this protocol when it changes into text. Different providers use different
+protocols:
 
-The LLM's training determines which protocol it speaks. The Prompt must serialize accordingly. Running the same Session against two different LLMs may require different Prompt serialization — the Prompt is where that difference lives.
+- **Anthropic**: the API has `system`, `messages[]` and `tools[]`. A tool call
+  comes back in the output as a `tool_use` block.
+- **OpenAI**: `messages[]` has the roles `system`, `user`, `assistant` and
+  `tool`. The function calls use `tools[]`. A tool call comes back in the
+  `tool_calls` field.
+- **One string with special tokens**: some systems of a previous type put all
+  the parts into one string. Special tokens, for example `<|im_start|>`, divide
+  the parts.
+- **XML**: some models give the best results with XML in a string, for example
+  `<task>` and `<tool_call>`.
 
----
+You can run the same Session with two different LLMs. Then each LLM can have a
+different text of the Prompt. This difference is in the Prompt, not in the
+Session.
 
-## Prompt and Tool Definitions
+<a id="prompt-and-tool-definitions"></a>
 
-A Tool schema in the Prompt is not the Tool itself. The Tool is a function in agent-side code (`execute(params) → result`). What the Prompt carries is the Tool's **schema** — name, description, input shape — so the LLM knows the Tool exists and how to invoke it. When the LLM's output contains a tool call, agent-side code matches the name to the actual Tool and runs its `execute`. The Prompt says "here's what's available"; the AgentLoop says "let's run what the LLM chose."
+## Tool schemas in the Prompt
 
-This separation is why bash is such a distinctive Tool: its schema in the Prompt is a single input (`command: string`), but its actual capability is whatever the [Environment](../environment/environment.md) allows. The Prompt's tool schema is narrow; the Tool's real power is wide.
+A tool schema in the Prompt is not the Tool. The Tool is a function in the code
+of the agent: `execute(params) → result`. The Prompt holds only the schema of
+the Tool: its name, its description and the shape of its input. With the schema,
+the LLM knows that the Tool is available and how to call it.
 
----
+If the output of the LLM has a tool call, the code of the agent finds the Tool
+with that name. Then it runs the `execute` function of that Tool. The Prompt
+tells the LLM which Tools it can use. The [AgentLoop](../harness/agent-loop.md)
+runs the Tool that the LLM selects.
+
+The bash tool shows this difference clearly. Its schema in the Prompt has one
+input: `command: string`. But the [Environment](../environment/environment.md)
+sets the operations that the bash tool can do, and these operations are very
+many. The tool schema is small, but the Tool can do many operations.
 
 ## Related
 
-- [LLM](llm.md) — the function the Prompt feeds into
-- [Tool](tool.md) — what Tool schemas in the Prompt reference
-- [Session](../harness/session.md) — source of the message history in the Prompt
-- [PromptLoading](../patterns/prompt-loading.md) — strategies that fill Prompt slots (eager, lazy, progressive, per-turn)
-- [AgentLoop](../harness/agent-loop.md) — assembles the Prompt each iteration, parses the LLM's output stream
+- [LLM](llm.md): the function that reads the Prompt.
+- [Tool](tool.md): the item that each tool schema of the Prompt identifies.
+- [Session](../harness/session.md): the source of the history of the Prompt.
+- The pattern [PromptLoading](../patterns/prompt-loading.md) fills the slots of
+  the Prompt at the start, on request, in steps or for each turn.
+- [AgentLoop](../harness/agent-loop.md): makes the Prompt for each loop and
+  parses the output stream of the LLM.

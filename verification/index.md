@@ -1,83 +1,140 @@
 # Verification
 
-Verification is how you confirm that an agent system works. It is an orthogonal concern — not a primitive or pattern, but a set of strategies that intersect every primitive at its boundaries.
+Verification is the work that shows that an agent system operates correctly.
+Usual tests are not sufficient, because the LLM in the system can give different
+outputs for the same input. Verification is not a tier of the theory. It is a
+set of methods that applies to each part of the system at its boundaries.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-Traditional software is deterministic. Given the same input, the same code produces the same output. Testing is straightforward: call a function, assert on the result. If the test passes today, it passes tomorrow.
+## Value
 
-Agent systems break this contract. The core computation — the [LLM](../primitives/llm.md) — is non-deterministic. The same prompt may produce different reasoning, different tool call sequences, different outputs. The [AgentLoop](../harness/agent-loop.md) compounds this: each tool call produces a result that the LLM interprets to decide the next action, so small variations early in a run cascade into divergent trajectories.
+Usual software is deterministic. The same code with the same input gives the
+same output. A test calls a function and examines the result. If the test passes
+one time, it passes each time.
 
-The answer is not "you can't test agents." The answer is that agent systems have multiple layers, most of which are deterministic, and the non-deterministic core requires different verification strategies than the deterministic shell. Understanding which layer you're verifying — and what tools apply at each — is the difference between a system you trust and one you hope works.
+An agent system does not obey this rule:
 
----
+- The [LLM](../primitives/llm.md) at the core of the system is not
+  deterministic. The same prompt can give different reasoning, different
+  sequences of tool calls and different outputs.
+- The [AgentLoop](../harness/agent-loop.md) makes this effect larger. The LLM
+  reads each tool result and selects the next step from it. Thus a small
+  difference at the start of a run can give a very different trajectory.
 
-## The Shape of Verification
+You can examine an agent system with tests. An agent system has many layers, and
+most of these layers are deterministic. The core that is not deterministic must
+have different verification methods from the deterministic shell around it. Know
+the layer that you examine and the methods for that layer. Then you are sure
+that the system operates correctly, and you do not only think it.
 
-Verification decomposes into three concerns:
+<a id="the-shape-of-verification"></a>
 
-- **[Trace](trace.md)** — what you observe. The ordered sequence of LLM calls, tool invocations, and intermediate results produced by an [AgentLoop](../harness/agent-loop.md). Every verification strategy operates on some subset of the trace.
-- **[Seams](seams.md)** — where you substitute. Every primitive boundary is a point where one implementation can be swapped for another (a mock LLM, a pre-populated channel, a fake tool). This is what makes agent systems testable at all.
-- **[Strategies](strategies.md)** — what you assert and when. Distinct techniques, each combining traces and seams differently: shell testing, property-based output verification, LLM-as-judge, trajectory verification, snapshot testing.
+## The parts of verification
 
-The three are layered: traces define the observable surface, seams define the substitution points on that surface, and strategies define what to check at each seam and how often.
+Verification has these parts:
 
----
+- **[Trace](trace.md)**: the data that you record. A trace is the sequence of
+  the LLM calls, the tool calls and the results between them in one run of an
+  [AgentLoop](../harness/agent-loop.md). Each verification method examines a
+  part of the trace.
+- **[Seams](seams.md)**: the points where a test replaces a part. A seam is at
+  each point where two primitives connect. At a seam, a test can put a different
+  implementation, for example a mock LLM or a channel with prepared data. It can
+  also put a tool that gives recorded results. Seams let a test examine an agent
+  system.
+- **[Methods](strategies.md)**: the checks that you do, and the time when you do
+  them. Each method uses traces and seams differently. The methods are shell
+  tests, property checks, LLM judges, trajectory checks and snapshot tests.
 
-## The Verification Stack
+These parts are layers. The traces give the data that a test can see. The seams
+give the points in that data where a test can replace a part. The methods tell
+the checks to do at each seam and how frequently to do them.
 
-The five [strategies](strategies.md) compose into a stack, ordered by cost and determinism:
+## The verification stack
+
+The [verification methods](strategies.md) make a stack. At the top are the
+methods that are free and deterministic. At the bottom are the methods that use
+the LLM, and are not deterministic. The model provider charges for each LLM
+call.
 
 ```
                           Cost    Determinism   Frequency
                           ────    ───────────   ─────────
 ┌─────────────────────┐
-│  Shell testing       │  Free    Deterministic  Every commit
+│  Shell tests         │  Free    Deterministic  Every commit
 │  (mock LLM)          │
 ├─────────────────────┤
 │  Prompt snapshots    │  Free    Deterministic  Every commit
 │  (golden files)      │
 ├─────────────────────┤
-│  Property assertions │  $$      Non-det        On prompt/model change
+│  Property checks     │  $$      Non-det        On prompt/model change
 │  (real LLM)          │
 ├─────────────────────┤
 │  Trajectory checks   │  $$      Non-det        On agent logic change
 │  (real LLM + trace)  │
 ├─────────────────────┤
-│  LLM-as-judge        │  $$$     Non-det        Scheduled (nightly/weekly)
+│  LLM judge           │  $$$     Non-det        Scheduled (nightly/weekly)
 │  (eval suite)        │
 └─────────────────────┘
 ```
 
-Every layer catches different failures. No single layer is sufficient:
+Each layer finds different problems. One layer is not sufficient:
 
-- Shell tests catch plumbing bugs but miss prompt quality issues.
-- Property assertions catch structural failures but miss subtle quality regression.
-- LLM-as-judge catches quality issues but is expensive and non-deterministic.
-- Trajectory checks catch behavioral issues but require trace infrastructure.
+- Shell tests find bugs in the connections between the parts. They do not find
+  problems in the quality of the prompt.
+- Property checks find errors in the structure of the output. They do not find
+  small changes that make the quality worse.
+- An LLM judge finds problems in quality. But it uses many LLM calls, and its
+  result is not deterministic.
+- Trajectory checks find errors in the steps of the agent. But they are possible
+  only with a system that records traces.
 
-A production agent system needs at least the shell-test and prompt-snapshot layers. A serious one adds property assertions. A mature one has the full stack.
+An agent system for customers must have at minimum the shell tests and the
+snapshots of the prompt. A better system also has property checks. The best
+systems have the full stack.
 
----
+<a id="design-implications"></a>
 
-## Design Implications
+## Decisions for builders
 
-**For agent builders**: Make the LLM [seam](seams.md) explicit from day one. If your agent code calls the LLM directly (hardcoded subprocess call, inline API client), every test requires a real LLM call or monkey-patching. If the LLM is behind a protocol, testing the deterministic shell is trivial. This is the single highest-leverage design decision for testability.
+**Agent builders**: put the LLM [seam](seams.md) in the code from the start.
+Some agent code calls the LLM directly, for example with a command in the code
+or with an inline API client. Then each test must call the LLM, or change the
+code at runtime. If the LLM is behind a protocol, a test of the deterministic
+shell is easy. For tests, no other decision about the structure of the code has
+a larger effect.
 
-**For pipeline builders**: Capture [traces](trace.md). Even if you don't write trajectory assertions today, having traces means you can debug failures, replay runs, and add assertions later. A trace is cheap to capture and expensive to reconstruct after the fact.
+**Pipeline builders**: record a [trace](trace.md) of each run. With traces, you
+can debug errors, do a run again and add trajectory checks at a different time.
+Record the traces also if you do not write trajectory checks. A trace is easy to
+record during the run. After the run, it is hard to make again.
 
-**For eval builders**: Reuse the [Evaluator](../patterns/evaluator.md) pattern. If your agent already has runtime self-correction (retry loop with LLM-as-judge), extract the evaluation criteria into a shared definition. Run the same criteria offline for quality tracking. One set of criteria, two deployment modes.
+**Builders of quality tests**: use the [Evaluator](../patterns/evaluator.md)
+pattern again. An agent can correct its work at runtime, with a retry loop and
+an LLM judge. Then put the quality rules of that judge into one definition for
+the agent and the tests. Use the same rules after the run to monitor the
+quality. The agent and the quality tests then use one set of rules in two modes.
 
-**For the theory**: Verification connects [Guardrails](../harness/guardrail.md) (runtime prevention) with offline quality assurance. Both operate on the same action space — tool calls, outputs, trajectories — but at different points in the lifecycle. A complete agent system has both: guardrails that prevent catastrophic actions during execution, and verification that confirms correct behavior after execution.
+**The theory**: verification connects [Guardrails](../harness/guardrail.md) with
+the quality checks after the run. A Guardrail prevents errors at runtime. The
+two examine the same operations of the agent: tool calls, outputs and
+trajectories. But they operate at different times.
 
----
+A full agent system has the two layers. Guardrails stop dangerous operations
+during the run. Verification shows correct operation after the run.
 
 ## Related
 
-- [Trace](trace.md) — the observable output of an AgentLoop
-- [Seams](seams.md) — substitution points at primitive boundaries
-- [Strategies](strategies.md) — the verification techniques
-- [Guardrail](../harness/guardrail.md) — runtime prevention, complementary to offline verification
-- [Evaluator](../patterns/evaluator.md) — the pattern reused for LLM-as-judge verification
-- [AgentLoop](../harness/agent-loop.md) — what produces the traces that verification inspects
-- [Channel](../patterns/channel.md) — channel boundaries are natural verification seams
+- [The trace](trace.md): the data that one run of an AgentLoop gives.
+- [Seams](seams.md): the points at the boundaries of primitives where a test can
+  replace a part.
+- [Verification methods](strategies.md): the checks and when to run them.
+- [Guardrail](../harness/guardrail.md): the runtime layer that prevents errors.
+  Verification after the run adds to it.
+- [Evaluator](../patterns/evaluator.md): the pattern that the LLM judge uses
+  again.
+- [AgentLoop](../harness/agent-loop.md): the harness that makes the traces that
+  verification examines.
+- [Channel](../patterns/channel.md): the boundaries of a channel are usual seams
+  for verification.

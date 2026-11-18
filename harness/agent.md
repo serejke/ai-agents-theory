@@ -1,47 +1,118 @@
 # Agent
 
-An Agent is the runnable unit: a Session wrapped in a Frontend and pinned to an Environment. It is what people mean when they say "I built an agent" or "the Claude Code agent" or "a Slack agent" — the whole invocable thing, not just the reasoning inside it. "Claude Code CLI," "Claude Code SDK," and "Claude Code GitHub Action" are three Agents built from the same Session with different Frontends and Environments.
+An Agent is a full program that a person or a different program can start and
+use, for example Claude Code in a terminal. It has a frontend for the input and
+the output, a loop with an LLM and tools, and resources for the tools. The
+theory calls the loop the **Session** and the resources the **Environment**.
 
-**Composition**: Frontend + [Session](session.md) + [Environment](../environment/environment.md).
+**Composition**: Frontend + [Session](session.md) +
+[Environment](../environment/environment.md).
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-A [Session](session.md) can hold a conversation, but it doesn't start itself, doesn't know where to send results, and doesn't know what substrate it's running on. The Agent is the layer that answers: what wraps this Session? What's the I/O contract with the caller? Which Environment does it run against?
+## Value
 
-Agent is harness, not a compositional choice. Every running agent system is an Agent, even if it's just `python agent.py < input.txt > output.txt` — that is a Frontend (stdin/stdout) wrapping a Session in the local Environment. Thinking in terms of Agent makes it obvious that moving a coding assistant from "interactive CLI" to "scheduled GitHub Action" is not a rewrite; it's a swap of Frontend and Environment around the same Session.
+A [Session](session.md) can hold a conversation, but a different part must start
+it. The Session does not know where to send its results. It also does not know
+the resources that it operates on. The Agent gives these facts:
 
-### Agent vs. agent
+- the frontend that starts the Session
+- the contract of the input and the output with the caller
+- the [Environment](../environment/environment.md) of the Session.
 
-The theory uses **Agent** (capital A) for this formal concept — the runnable unit, the triple (Frontend, Session, Environment). Lowercase "agent" is reserved for colloquial use: "the agent decides which tool to call" refers to the reasoning, which happens inside the Session. This mirrors the Tool-vs-tool convention elsewhere in the book.
+The Agent is a part of the harness, not an optional pattern. Each agent system
+that runs is an Agent. A small script, for example
+`python agent.py < input.txt > output.txt`, is also an Agent. Its frontend is
+the standard input and the standard output, and its Session runs in the local
+Environment.
 
-When precision matters, the theory names the specific layer: LLM for the reasoner, Session for the cognitive core (AgentLoop + history + tools + system prompt), Agent for the whole invocable unit.
+With this concept, a change of frontend is easy to see. If you move a coding
+agent from a CLI to GitHub Actions, you do not write it again. You replace the
+frontend and the Environment, and the Session stays the same. For example,
+"Claude Code CLI", "Claude Code SDK" and "Claude Code GitHub Action" are
+different Agents. They use the same Session with different frontends and
+different Environments.
 
-## Formal Definition
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type Frontend =
-  | { kind: "cli"; interactive: boolean } // stdin/stdout, with or without prompt loop
+  | { kind: "cli"; interactive: boolean } // stdin/stdout, with or without a prompt loop
   | { kind: "sdk"; module: string } // function call from another program
-  | { kind: "http"; route: string; verb: string } // REST/GraphQL endpoint
-  | { kind: "github_action"; events: string[] } // issue_opened, pr_commented, etc.
+  | { kind: "http"; route: string; verb: string } // REST or GraphQL endpoint
+  | { kind: "github_action"; events: string[] } // issue_opened, pr_commented, ...
   | { kind: "slack_bot"; channels: string[] } // incoming message
-  | { kind: "cron"; schedule: string } // scheduled fire
-  | { kind: "webhook"; url: string }; // arbitrary external signal
+  | { kind: "cron"; schedule: string } // runs on a schedule
+  | { kind: "webhook"; url: string }; // any external signal
 
 type Agent = {
   frontend: Frontend;
-  session: Session; // or a factory: new Session per invocation
+  session: Session; // or a factory: a new Session for each run
   environment: Environment;
 };
 ```
 
-The Frontend carries both the invocation side (what event or call triggers the run) and the output side (how results reach the caller) — these are two faces of the same interface. A CLI Frontend reads stdin and writes stdout. An HTTP Frontend receives a request and sends a response. A GitHub Action Frontend consumes an event payload and writes a PR or comment. There's no need to separate "trigger" and "output" as independent concepts; they are paired halves of the Frontend contract.
+The frontend has two sides of one interface:
 
----
+- The input side: the call or the message that starts the run.
+- The output side: the path of the results back to the caller.
 
-## Same Session, Different Agents
+| Frontend       | Input side         | Output side                 |
+| -------------- | ------------------ | --------------------------- |
+| CLI            | the standard input | `stdout`                    |
+| HTTP           | a request          | a response                  |
+| GitHub Actions | a payload          | a pull request or a comment |
 
-A fixed Session configuration can be wrapped into multiple Agents with no change to the cognitive core:
+The theory does not divide the start of the run and the output into two
+concepts. They are the two sides of the contract of the frontend.
+
+<a id="agent-vs-environment"></a>
+
+## The parts of an Agent
+
+An Agent connects these layers into one unit that runs:
+
+- **Frontend**: how a person or a program starts the Agent and gets its results.
+- **[Session](session.md)**: the reasoning core. It holds the
+  [AgentLoop](agent-loop.md), the history, the tools and the system prompt.
+- **Environment**: the resources that the Agent operates on. These are the
+  filesystem, the runtime, the network and the credentials.
+
+An Agent uses an [Environment](../environment/environment.md), but the
+Environment is not a part of the Agent. If two Agents have the same frontend and
+the same Session but different Environments, they are different Agents. For
+example, a coding Agent with full access to the local computer is different from
+the same coding Agent in a sandbox container.
+
+<a id="agent-vs-agent"></a>
+
+## Agent and agent
+
+When a person tells "I built an agent", "the Claude Code agent" or "a Slack
+agent", the person refers to the Agent. This is the full system that the person
+can start, not only the reasoning in it.
+
+The theory writes **Agent** with an uppercase letter for this concept: the unit
+of a frontend, a Session and an Environment. It writes "agent" in lowercase for
+the usual meaning. In "the agent decides which tool to call", the word refers to
+the reasoning, and this reasoning occurs in the Session. The book uses the same
+rule for Tool and tool.
+
+If the layer is important, the theory gives its name:
+
+- **LLM**: the part that does the reasoning.
+- **Session**: the reasoning core. It holds the AgentLoop, the history, the
+  tools and the system prompt.
+- **Agent**: the full unit that a person or a program can start.
+
+<a id="same-session-different-agents"></a>
+
+## One Session in different Agents
+
+You can put one Session configuration into many Agents, and the reasoning core
+does not change:
 
 ```typescript
 const claudeCodeSession = createSession({
@@ -50,21 +121,21 @@ const claudeCodeSession = createSession({
   system: claudeCodeSystemPrompt,
 });
 
-// Interactive CLI — human in the loop
+// Interactive CLI: a human in the loop
 const cli: Agent = {
   frontend: { kind: "cli", interactive: true },
   session: claudeCodeSession,
   environment: { code: localFS, runtime: localNode, os: localShell },
 };
 
-// SDK — embedded in another program
+// SDK: embedded in another program
 const sdk: Agent = {
   frontend: { kind: "sdk", module: "claude-code-sdk" },
   session: claudeCodeSession, // same Session
   environment: { code: localFS, runtime: localNode, os: localShell },
 };
 
-// GitHub Action — event-driven, creates PRs
+// GitHub Action: starts on repository events, creates PRs
 const action: Agent = {
   frontend: { kind: "github_action", events: ["issues.opened"] },
   session: claudeCodeSession, // same Session
@@ -72,53 +143,56 @@ const action: Agent = {
 };
 ```
 
-The Session is identical across all three. What changes is the Frontend (how the outside world invokes and receives results) and the Environment (the substrate the agent acts on). This is a direct consequence of keeping concerns separate: the cognitive core doesn't know how it was invoked or where its output goes, so the same core serves every Agent.
+The Session is the same in the three Agents. Only these parts change:
 
----
+- the frontend: how a person or a program starts the Agent and gets the results
+- the Environment: the resources that the agent operates on.
 
-## The Frontend Is the Product Surface
+This result comes from the separation of the layers. The reasoning core does not
+know how the run started or where its output goes. Thus the same core can
+operate in each Agent.
 
-What a user experiences as "Claude Code" or "Codex" or "Cursor" is the Frontend. The cognitive core is invisible to the user; the Frontend is what they interact with. Product differentiation — the UX, the I/O shape, the integration points — lives in the Frontend layer while the Session remains commodity.
+<a id="the-frontend-is-the-product-surface"></a>
 
-This is why the same underlying Session can appear as:
+## The frontend is the product
 
-- An interactive terminal Agent
-- A VS Code extension Agent embedded in an editor
-- A web Agent that talks to a backend which talks to the Session
-- A GitHub bot Agent that opens PRs from issues
-- A Slack bot Agent that answers questions about a codebase
-- A scheduled Agent that runs overnight and emails a report
+A user knows Claude Code, Codex or Cursor through its frontend. The user does
+not see the reasoning core. The products are different in their frontends: the
+user interface, the format of the input and the output, and the connections to
+other systems. The Session can be the same in many products.
 
-Each is a different product — a different Agent. The Session inside is the same underlying capability.
+Thus the same Session can be in these Agents:
 
----
+- an Agent in a terminal
+- an Agent in a VS Code extension, where the user changes code
+- a web Agent that sends requests to a backend, which then sends them to the
+  Session
+- an Agent on GitHub that opens pull requests from issues
+- an Agent in Slack that replies to messages about the code of a project
+- an Agent that runs after the work hours and sends a report in an email.
 
-## Agent vs. Environment
+Each item is a different product and a different Agent. The Session in them
+gives the same functions.
 
-An Agent _uses_ an [Environment](../environment/environment.md) but doesn't define it. Two Agents with the same Frontend and Session but different Environments are meaningfully different: a "coding Agent with full local access" is different from "the same coding Agent in a sandboxed container," even though the Frontend and cognitive core are identical.
+<a id="agent-vs-topology"></a>
 
-Keep the layers distinct:
+## Agent and Topology
 
-- **Frontend** = how the outside world invokes and receives from the Agent.
-- **Session** = the cognitive core (AgentLoop + history + tools + system prompt).
-- **Environment** = the substrate the Agent acts on (filesystem, runtime, network, credentials).
+One Agent holds one Session. When two or more Agents operate together, they make
+a [Topology](../patterns/topology.md). A Topology is a pattern on top of these
+Agents. Each Session in a Supervisor or a Swarm is in a different Agent, with a
+frontend, a Session and an Environment. The Topology tells how these Agents send
+data to each other.
 
-An Agent pins all three down into a concrete runnable unit.
-
----
-
-## Agent vs. Topology
-
-A single Agent wraps one Session. When multiple Agents coordinate, you have a [Topology](../patterns/topology.md) — a pattern layered on top of multiple Agents. Each participant in a Supervisor or Swarm is its own Agent (its own Frontend wiring to its own Session and Environment); the Topology describes how those Agents communicate.
-
-Agent is the unit. Topology is the arrangement of units.
-
----
+The Agent is the unit. The Topology is the configuration of the units.
 
 ## Related
 
-- [Session](session.md) — the cognitive core that the Agent wraps
-- [AgentLoop](agent-loop.md) — the computation inside the Session
-- [Environment](../environment/environment.md) — the substrate the Agent pins the Session to
-- [Topology](../patterns/topology.md) — the pattern that coordinates multiple Agents
-- [StateMachine](../patterns/state-machine.md) — phases and transitions within the Session
+- [Session](session.md): the reasoning core in the Agent
+- [AgentLoop](agent-loop.md): the loop in the Session
+- [Environment](../environment/environment.md): the resources that the Agent
+  connects the Session to
+- [Topology](../patterns/topology.md): the pattern that connects two or more
+  Agents
+- [StateMachine](../patterns/state-machine.md): the phases in the Session and
+  the changes between them

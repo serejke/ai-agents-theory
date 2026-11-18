@@ -11,7 +11,6 @@
 # does not change them.
 exclude = [
     ".claude/rules/stelint-prose.md",
-    ".claude/rules/stelint-names.md",
     ".claude/rules/stelint-check.md",
     ".claude/rules/stelint-rust.md",
 ]
@@ -26,3 +25,11 @@ exclude = [
 lists = ["stelint:software", "stelint:numbers", "~/.stelint/words/asd-ste100-issue9.toml"]
 
 [rules]
+
+# `case-studies/pi.md` keeps the anchors of its previous headings in
+# `<a id>` lines, because links on social networks use them. Some of these
+# anchors are longer than 80 columns, and an anchor cannot be divided.
+# prettier divides the other lines of the file at 80 columns.
+[[overrides]]
+files = ["case-studies/pi.md"]
+rules.line-width = "off"

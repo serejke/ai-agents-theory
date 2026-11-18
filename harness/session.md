@@ -1,37 +1,61 @@
 # Session
 
-A Session wraps an [AgentLoop](agent-loop.md) with persistent conversation history, turning a stateless computation into a stateful conversational agent. It is the layer of the harness that makes multi-turn interaction possible.
+A **Session** is an [AgentLoop](agent-loop.md) that keeps the history of its
+conversation. Each message and each output of the agent go into this history,
+and the LLM reads the history again on each turn. This part of the harness lets
+an agent continue a conversation across many turns.
 
 **Composition**: AgentLoop + history (Message[]).
 
-## Why It Matters
+## Value
 
-[AgentLoop](agent-loop.md) takes messages as input and produces events as output, but doesn't maintain state between invocations. Each call is independent — the loop doesn't know what happened in the previous turn.
+<a id="why-it-matters"></a>
 
-A Session adds what AgentLoop lacks: an accumulating `history` array that grows with each turn. When the user sends a message, it's appended to history. When the agent responds, the response is appended to history. On the next LLM call, a snapshot of this history is assembled into the [Prompt](../primitives/prompt.md)'s `messages` slot — Session is the owner, Prompt is the per-call view. This is what makes "remember what I said earlier" work.
+The Session gives the agent the history of the conversation. Without it, the
+agent does not know about the previous turn. The [AgentLoop](agent-loop.md) gets
+messages as input and gives `Event` items as output, but it keeps no data
+between two calls. Each call starts again without data from the previous call.
 
-Session is harness, not a compositional choice. As soon as an agent runs the loop more than once, it has a Session — even if the author never writes the word. A single-shot invocation is a degenerate Session (history of length 1); a long-running chat is a Session whose history grows until it hits the context window.
+The Session adds a `history` array that becomes larger with each turn:
 
-## Formal Definition
+- When the user sends a message, the Session adds the message to the history.
+- When the agent gives an output, the Session adds the output to the history.
+- Before the next LLM call, the harness puts a copy of the history into the
+  `messages` slot of the [Prompt](../primitives/prompt.md).
+
+The Session holds the history. The Prompt is the view of the history for one
+call. Thus the agent knows the previous messages of the user.
+
+The Session is a part of the harness, not an optional pattern. When an agent
+runs the loop more than one time, it has a Session, also if its author does not
+use the word. A call with one input is a Session with a history of length 1. A
+long chat is a Session with a history that becomes larger until it fills the
+context window.
+
+## Definition
+
+<a id="formal-definition"></a>
 
 ```typescript
 type Session = {
-  history: Message[]; // accumulator — grows with each turn
+  history: Message[]; // grows with each turn
   loop: AgentLoop;
 
-  // send — the only method. Adds message, calls loop,
-  // accumulates response in history
+  // send is the only method. It adds the input to history, calls the loop,
+  // and adds the response to history.
   send: (input: string) => AsyncGenerator<Event>;
 };
 ```
 
-**Limitation**: history is bounded by the LLM's context window (~200K tokens). When it overflows, the session "dies" or loses the beginning. This is a hard limit — not a design choice but a physical constraint of the underlying [LLM](../primitives/llm.md) primitive.
-
----
+The context window of the [LLM](../primitives/llm.md) sets the limit of the
+history: approximately 200,000 tokens. If the history becomes larger, the
+Session stops, or it removes the start of the history. This is a hard limit. The
+author of the system does not select it. The Session uses the LLM, and the limit
+comes from the LLM.
 
 ## Claude Code as a Session
 
-A Claude Code CLI window is literally a Session:
+Each run of Claude Code in a terminal is a Session:
 
 ```typescript
 const claudeCodeSession = createSession({
@@ -40,13 +64,14 @@ const claudeCodeSession = createSession({
   system: buildSystem(
     coreInstructions,      // "you are Claude Code, you help with code"
     claudeMd,              // .claude/CLAUDE.md
-    projectContext,         // project structure, git status
+    projectContext,        // project structure, git status
     planModeRules,         // plan mode rules
   ),
 });
 ```
 
-**Claude Code SDK** — the same Session, but `send()` is called from code, not from stdin:
+The Claude Code SDK uses the same Session. But code calls `send()`, not a person
+who writes in the terminal:
 
 ```typescript
 // CLI:
@@ -58,36 +83,77 @@ readline.on("line", (input) => {
 const result = await session.send("add tests for the auth module");
 ```
 
-The difference in the model is **zero**. The only difference is in the I/O interface. This is a direct consequence of the compositional model: Session is Session regardless of what wraps it. The frontend — stdin, an SDK call, an HTTP handler — is a separate concern; see [Agent](agent.md).
+The model of the two examples is the same. Only the interface for the input and
+the output is different. This comes from the composition: a Session stays the
+same Session for each frontend around it. The frontend is a different part of
+the system, for example the standard input, an SDK call or an HTTP handler. The
+[Agent](agent.md) document tells about the frontend.
 
----
+<a id="session-as-working-memory"></a>
 
-## Session as Working Memory
+## Session history and Memory
 
-In cognitive terms, Session history is **working memory** — the active context the agent uses for the current task. It's fast (always available, no retrieval needed), limited (bounded by context window), and volatile (lost when the session ends).
+In terms of the memory of a person, the Session history is the **working
+memory** of the agent: the active context of the task. The Session history has
+these properties:
 
-This contrasts with [Memory](../patterns/memory.md), which is **long-term memory** — persistent across sessions, potentially unlimited, but requires explicit storage and retrieval. The relationship:
+- It is fast. It is always available, and the agent does not use a tool to find
+  it.
+- It is small. The context window sets its maximum dimension.
+- It does not stay. When the Session stops, its history is not available.
 
-- **Session history**: what the agent knows about _this_ conversation (working memory)
-- **Memory**: what the agent knows from _past_ conversations (long-term memory)
+[Memory](../patterns/memory.md) is the **long-term memory** of the agent. It
+stays across Sessions, and it can be very large. But the agent must write each
+fact into it and then find the fact again with a tool.
 
-The gap between them is where knowledge is lost. Everything discussed in a session that isn't extracted into Memory disappears when the session ends. Closing this gap — automatic extraction of decisions and preferences from session history into persistent memory — is the main unsolved problem in the [Memory](../patterns/memory.md) pattern.
+- **Session history**: the knowledge of the agent about _this_ conversation
+  (working memory).
+- **Memory**: the knowledge of the agent from _previous_ conversations
+  (long-term memory).
 
----
+Knowledge does not always go from the Session history into Memory. If the agent
+does not move a fact from the Session history into Memory, the fact is not
+available after the Session stops. The automatic movement of decisions and user
+selections from the Session history into Memory is the most important open
+problem of the [Memory](../patterns/memory.md) pattern.
 
-## Session-Graphs
+<a id="session-graphs"></a>
 
-Sessions are linear by definition, but multiple sessions can share a common prefix — a forked session's first N messages are identical to another's. Most systems hide this relation: forking means a full copy, resuming means loading one session in isolation. A **session-graph** makes the shared-prefix relation first-class — sessions are stored as parent-linked nodes, and a pointer selects which leaf is active. Branching becomes a pointer move rather than a copy; switching between explored alternatives is cheap.
+## Session graphs
 
-This is a [Workspace](../patterns/workspace.md)-shaped structure _over_ Sessions, not a change to Session itself. Each leaf is still a linear history, and the LLM always sees a flat root-to-leaf slice. What becomes navigable is the graph itself — nodes are conversation states, edges are parent links. For workflows that rely on exploration ("try three approaches, keep the one that worked") the session-graph is a useful structure to expose; for conventional turn-by-turn chat it is unnecessary. The [PI case study](../case-studies/pi.md) is a concrete implementation.
+A **session graph** keeps two or more Sessions that start with the same messages
+in one tree. Each Session is linear. A **fork** of a Session has the same first
+messages as the Session that it comes from.
 
----
+Most systems do not show this relation. A fork makes a full copy, and a system
+that continues a Session loads only that Session. A session graph shows the same
+start directly:
+
+- It stores the Sessions as nodes with links to the previous node.
+- A pointer selects the active **leaf**: the last node of one Session.
+- A new branch only moves the pointer, and it does not make a copy. Thus the
+  user can go between the alternatives quickly.
+
+The session graph is a structure of the [Workspace](../patterns/workspace.md)
+pattern _above_ the Sessions. It does not change the Session. Each leaf is
+always a linear history. The LLM always sees a flat part of the graph from the
+root to the leaf. The user can move through the graph: the nodes are conditions
+of the conversation, and the edges are links to the previous node.
+
+A session graph helps in a workflow that tries alternatives, for example "try
+three approaches, keep the one that worked". A usual chat with one turn after
+the other does not use it. The [PI case study](../case-studies/pi.md) shows an
+implementation.
 
 ## Related
 
-- [AgentLoop](agent-loop.md) — the computation that Session wraps with state
-- [LLM](../primitives/llm.md) — the stateless function whose context window bounds Session history
-- [Memory](../patterns/memory.md) — cross-session persistence; complements Session's within-session history
-- [PromptLoading](../patterns/prompt-loading.md) — injects knowledge into the Session's system prompt
-- [Continuity](../patterns/continuity.md) — the protocol for coherent progress across multiple Sessions
-- [Agent](agent.md) — how Sessions get wrapped in a Frontend and pinned to an Environment
+- [AgentLoop](agent-loop.md): the loop that the Session gives a history.
+- [LLM](../primitives/llm.md): the function without memory. Its context window
+  sets the limit of the Session history.
+- [Memory](../patterns/memory.md): the knowledge that stays across Sessions. It
+  adds to the history in one Session.
+- The pattern [PromptLoading](../patterns/prompt-loading.md) puts knowledge into
+  the system prompt of the Session.
+- [Continuity](../patterns/continuity.md): the protocol that lets work continue
+  across two or more Sessions.
+- [Agent](agent.md): how a Session gets a frontend and an Environment.

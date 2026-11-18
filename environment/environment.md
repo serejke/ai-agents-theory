@@ -1,78 +1,176 @@
 # Environment
 
-Environment is the substrate the agent acts upon — the filesystem it reads, the processes it runs, the network it reaches, the credentials it holds. It is not part of the agent; it is the world the agent inhabits. Tools are the interface; Environment is what the interface reaches.
+The Environment is the set of resources where an agent does its work. It holds
+the files that the agent reads, the processes that it runs, the network that it
+connects to and the credentials that it has. The Environment is not a part of
+the agent: the tools are the interface, and the Environment is the item that the
+tools operate on.
 
-**Shape**: a resource bundle — code access, runtime, operating system, network reachability, credentials, installed software. Not a composition of primitives, harness, or patterns; a distinct concept in its own right.
+**Shape**: a group of resources — access to code, a runtime, an operating
+system, access to the network, credentials and installed software. The
+Environment is not a composition of primitives, harness or patterns. It is a
+different tier of the theory.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-An agent with the same [LLM](../primitives/llm.md), the same [Tools](../primitives/tool.md), the same [Session](../harness/session.md), and the same system prompt behaves very differently depending on what Environment it runs in. A coding agent on your laptop can do anything your shell can; the same agent in an ephemeral container can only touch what's inside the container; the same agent in a browser sandbox can only touch what the sandbox exposes.
+## Value
 
-This matters because the agent's _effective_ capability is a function of Environment, not of tool count. For [generative tools](../primitives/tool.md) like `bash`, this is explicit — `capability = f(environment)`. For specific tools, Environment is a passive configuration that bounds what the tool can reach. Either way, two agents with identical configuration but different Environments are different agents.
+The Environment sets the limits of the operations that an agent can do. Give two
+agents the same [LLM](../primitives/llm.md), the same
+[Tools](../primitives/tool.md), the same [Session](../harness/session.md) and
+the same system prompt. If their Environments are different, the two agents
+operate very differently:
 
-Environment is also where most of the security and reliability thinking lives. Guardrails enforce constraints at the tool boundary; Environment enforces them at the substrate boundary. Running an agent in a fresh container is how you bound blast radius when the agent has generative tools whose exact actions you can't predict.
+- A coding agent on your computer can do all the operations that your shell can
+  do.
+- The same agent in a temporary container can change only the items in the
+  container.
+- The same agent in a sandbox of a browser can use only the items that the
+  sandbox shows.
 
-## Formal Definition
+Thus, two agents with the same configuration and different Environments are two
+different agents.
+
+The Environment, not the number of tools, sets the limits of an agent. For a
+[generative tool](../primitives/tool.md), for example `bash`, the limits are a
+function of the Environment: `capability = f(environment)`. For a specific tool,
+the Environment is a configuration that does not change. It sets the limits of
+the resources that the tool can use.
+
+The Environment is also the area of most decisions about security and about the
+correct operation of an agent. [Guardrails](../harness/guardrail.md) apply
+limits at the boundary of the tools. The Environment applies limits at the
+boundary of the resources. You cannot know all the operations of a generative
+tool before they occur. A new container for each run keeps the damage of these
+operations small.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type Environment = {
   code?: CodeAccess; // git clone, local files, read-only mount
   runtime?: Runtime; // node, python, docker, databases
   os?: OSAccess; // shell, gh, ssh, kubectl
-  network?: NetworkAccess; // what domains/ports are reachable
+  network?: NetworkAccess; // the domains and ports that the agent can reach
   credentials?: Credential[]; // API keys, tokens, SSH keys
-  filesystem?: FilesystemAccess; // read/write paths
+  filesystem?: FilesystemAccess; // the paths that the agent can read and write
 };
 ```
 
-The fields are optional because Environments vary widely in what they include. A planning agent may need only `code` (read-only repo access). A full-stack coding agent needs `code + runtime + os`. A pure-reasoning agent may have an effectively empty Environment.
+All the fields are optional, because the resources of Environments are very
+different:
 
-Environment is not a composition in the theory's sense — it doesn't build from primitives and patterns. It's the ontological substrate those primitives act on. Tools read and write Environment; [Guardrails](../harness/guardrail.md) constrain actions at the tool boundary before they reach Environment; sandboxing constrains Environment itself.
+- An agent that only makes a plan can have only `code`, with read-only access to
+  the repository.
+- A coding agent that builds and runs all the parts of a product has `code`,
+  `runtime` and `os`.
+- An agent that only does reasoning can have an Environment that is almost
+  empty.
 
----
+The Environment is not a composition in the meaning of the theory. It does not
+come from primitives and patterns. It is the bottom layer that the primitives
+operate on:
+
+- Tools read and change the Environment.
+- [Guardrails](../harness/guardrail.md) put limits on the operations at the tool
+  boundary. They do this before an operation gets to the Environment.
+- A sandbox puts limits on the Environment.
+
+## Environment and generative tools
+
+The relation between a Tool and its Environment changes with the type of the
+[Tool](../primitives/tool.md):
+
+- **Specific tools**, for example `file_read`, `db_query` and `gmail_send`. The
+  Environment is a configuration that does not change. The tool schemas set the
+  limits of the resources that the agent can use. The agent cannot go out of the
+  tool set.
+- **Generative tools**, for example `bash`, a tool that runs code and a general
+  HTTP tool. The Environment is the limit. The agent can install packages, start
+  processes and connect to new services. It can do all the operations that the
+  Environment lets it do.
+
+```
+Specific tools:    capability = Σ(tool schemas)
+Generative tools:  capability = f(environment)
+```
+
+Thus, the Environment is most important for agents with generative tools.
+Compare a coding agent with `bash` in a new container with the same agent on the
+computer of the user. The two agents can do very different operations. If you
+cannot put limits on the tool, a sandbox puts limits on the Environment.
 
 ## Variants
 
-Environments sit on a spectrum from "full host access" to "heavily restricted sandbox." Each point on the spectrum is a trade-off between agent capability and blast-radius control.
+Some Environments give full access to the host. Other Environments are sandboxes
+with many limits, and many Environments are between these two points. For each
+Environment, you balance two properties:
 
-### Local OS
+- the operations that the agent can do
+- the control of the damage that the agent can cause.
 
-The agent runs as a process on the user's machine. Full access to the user's filesystem, installed tools, and credentials.
+| Variant                | Access of the agent                     |
+| ---------------------- | --------------------------------------- |
+| Local operating system | All the resources of the user           |
+| Container              | A new Linux system for each task        |
+| Virtual machine        | A full Linux system with a kernel       |
+| Sandbox                | Only the resources that the sandbox has |
+| Host on the network    | A different system through a protocol   |
+| API only               | Only calls to APIs through the network  |
+
+<a id="local-os"></a>
+
+### Local operating system
+
+The agent runs as a process on the computer of the user. It has full access to
+the files, the installed tools and the credentials of the user.
 
 ```typescript
 const localOS: Environment = {
   code: localFS("~/projects/repo"),
   runtime: localNode,
   os: localShell,
-  credentials: allUserCredentials, // agent has what the user has
+  credentials: allUserCredentials, // the agent has all that the user has
 };
 ```
 
-**Seen in**: Claude Code CLI, Cursor, pi CLI, local coding agents.
-**Strength**: Maximum capability, zero setup overhead, full tool ecosystem.
-**Weakness**: No isolation — the agent can do anything the user can, including accidental damage to unrelated files.
+- **Examples**: Claude Code, Cursor, PI and other local coding agents.
+- **Good**: The agent can do the most operations. It does not have a setup step,
+  and it can use all the tools of the user.
+- **Bad**: No boundary isolates the agent. It can do all that the user can do.
+  It can cause damage by accident to files that are not related to the task.
 
 ### Container
 
-Ephemeral isolated environment. The agent gets a fresh Linux system per task, with a specific image (tools, packages, OS version).
+A container is a temporary Environment that isolates the agent. The agent gets a
+new Linux system for each task. The container comes from an image that gives the
+tools, the packages and the version of the operating system.
 
 ```typescript
 const container: Environment = {
   code: gitClone("owner/repo"),
   runtime: dockerImage("node:20"),
   os: containerShell({ caps: ["NET_ADMIN"] }),
-  credentials: [githubToken], // only what you explicitly inject
+  credentials: [githubToken], // only the credentials that you give
   network: { allow: ["github.com", "npmjs.org"] },
 };
 ```
 
-**Seen in**: OpenAI Codex, GitHub Copilot Workspace, CI-driven coding agents.
-**Strength**: Isolation — agent can install packages, run servers, break things without affecting host. Clean state per task. Reproducible.
-**Weakness**: Setup overhead. No persistence across tasks without explicit export. Slower cold start than local.
+- **Examples**: Codex of OpenAI, Copilot Workspace of GitHub and coding agents
+  that run automatically after each change of the code.
+- **Good**: The container isolates the agent. The agent can install packages,
+  run servers and break items, and the host does not change. Each task starts in
+  a clean condition. A different run of the same task starts in the same
+  condition.
+- **Bad**: The setup uses time. The data does not stay after the task, if you do
+  not export it. The start is slower than the start of a local agent.
 
-### Virtual Machine
+### Virtual machine
 
-Full OS isolation (not just container). Heavier but stronger isolation guarantees.
+A virtual machine isolates a full operating system, not only a container. It
+uses more resources than a container, but it isolates the agent more.
 
 ```typescript
 const vm: Environment = {
@@ -83,39 +181,61 @@ const vm: Environment = {
 };
 ```
 
-**Seen in**: e2b, Modal, cloud-based long-running agents.
-**Strength**: Stronger isolation than containers (kernel boundary). Can run anything a Linux host can.
-**Weakness**: Provisioning latency. Higher cost per task. Usually overkill when containers suffice.
+- **Examples**: e2b, Modal and agents in the cloud that run for a long time.
+- **Good**: The virtual machine isolates the agent more than a container,
+  because the kernel is the boundary. The agent can run all the programs that a
+  Linux host can run.
+- **Bad**: A new virtual machine starts slowly. The cost of each task is higher.
+  Usually a container is sufficient, and then a virtual machine gives more than
+  necessary.
 
 ### Sandbox
 
-A deliberately _restricted_ Environment — the agent is given less than it could technically have. Sandboxes exist on the restriction axis: each sandbox picks what to forbid.
+A sandbox is an Environment with limits that you select. You give the agent less
+access than it can have. Each sandbox selects the access that it stops.
 
 ```typescript
 const codeSandbox: Environment = {
   code: readOnlyFS("/workspace"),
   runtime: pythonOnly,
-  os: null, // no shell access at all
+  os: null, // no shell
   network: { allow: [] }, // no network
   credentials: [], // no credentials
 };
 
 const browserSandbox: Environment = {
-  // Agent can only act through a browser page. No filesystem, no shell.
+  // The agent can use only one browser page. No filesystem, no shell.
   browser: chromiumInstance({ singlePage: true }),
   network: { allow: ["*"] },
 };
 ```
 
-**Seen in**: ChatGPT Code Interpreter (Python-only, no network, ephemeral), agent-browser sessions, enterprise document-analysis agents (read-only access to specific document tree).
-**Strength**: Tightest blast-radius control. Suitable for untrusted inputs, third-party automation, compliance-bound tasks.
-**Weakness**: Agent capability is capped at what the sandbox allows. For a generative-tool agent, this is often the right boundary; for a specific-tool agent it can be strictly weaker than tool-level guardrails.
+- **Examples**:
+  - Code Interpreter of ChatGPT. It runs only Python, it has no network, and its
+    data does not stay after the task.
+  - Sessions of `agent-browser`.
+  - Agents of companies that examine documents. They have read-only access to a
+    specified tree of documents.
+- **Good**: The sandbox gives the most control of the damage. It is correct for
+  untrusted data, for automatic operations of a different company and for tasks
+  that must obey external rules.
+- **Bad**: The agent can do only the operations that the sandbox lets it do. For
+  an agent with generative tools, this limit is frequently the correct boundary.
+  For an agent with specific tools, a sandbox can give less control than
+  Guardrails at the tool level.
 
-Sandbox isn't a separate concept — it's a point on the Environment spectrum. The word "sandbox" signals intent (deliberate restriction for safety) but there's no sharp line between "sandboxed container" and "container with tight rules."
+A sandbox is not a different concept. It is one point in the range of
+Environments. The word "sandbox" shows that you put limits on the Environment
+for safety. There is no clear line between "a container in a sandbox" and "a
+container with tight rules".
 
-### Remote Host (SSH, kubectl, cloud APIs)
+<a id="remote-host-ssh-kubectl-cloud-apis"></a>
 
-The agent's Environment is a remote system accessed over a protocol. The agent reaches in but isn't _inside_.
+### Host on the network
+
+The Environment of the agent is a different system on the network. The agent
+connects to it through a protocol, for example SSH, `kubectl` or the APIs of a
+cloud. The agent operates on the system, but it does not run in it.
 
 ```typescript
 const remote: Environment = {
@@ -125,13 +245,21 @@ const remote: Environment = {
 };
 ```
 
-**Seen in**: infrastructure agents, SRE automation, agents that drive remote systems.
-**Strength**: Operate on production infrastructure without running there. Existing access controls (SSH keys, kube RBAC) apply.
-**Weakness**: Network latency. Audit trails span systems. Session resumption is complex.
+- **Examples**: agents that operate servers, automatic operations that keep the
+  servers of a company available, and agents that control systems on the
+  network.
+- **Good**: The agent can operate on the servers that the customers use, but it
+  does not run on them. The access rules of these servers also apply to the
+  agent, for example SSH keys and the access rules of Kubernetes.
+- **Bad**: The network adds latency. The data about the operations of the agent
+  is on two or more systems. If a Session stops, it is not easy to continue it.
 
-### API-Only / Network-Only
+<a id="api-only--network-only"></a>
 
-The agent has no filesystem or shell — only outbound API calls. Closest to "pure reasoning over external data."
+### API only
+
+The agent has no filesystem and no shell. It can only send calls to APIs through
+the network. This variant is the nearest to "only reasoning on external data".
 
 ```typescript
 const apiOnly: Environment = {
@@ -140,50 +268,68 @@ const apiOnly: Environment = {
 };
 ```
 
-**Seen in**: Slack bots, workflow automation agents, simple integration agents.
-**Strength**: Smallest attack surface. Stateless. Easy to reason about.
-**Weakness**: Can't do anything the APIs don't expose. No local computation, no file handling.
+- **Examples**: agents in Slack, agents that do the steps of a workflow
+  automatically, and agents that connect two or three services.
+- **Good**: An attacker has the smallest number of points for an attack. The
+  agent keeps no data between calls. It is easy to know the operations of the
+  agent.
+- **Bad**: The agent can do only the operations that the APIs give. It cannot
+  calculate on a local computer, and it cannot use files.
 
----
+<a id="design-implications"></a>
 
-## Environment and Generative Tools
+## How to select an Environment
 
-The relationship between Tool and Environment changes with [tool expressiveness](../primitives/tool.md).
+Select the Environment carefully. The default "my computer, full access" is
+frequently not correct when other persons use the agent. Use an Environment with
+limits if the agent does one of these operations:
 
-**Specific tools** (`file_read`, `db_query`, `gmail_send`): Environment is a passive configuration. The tool's schema bounds what the agent can reach. The agent cannot escape the tool set.
+- It reads untrusted data.
+- It runs code from a different company or person.
+- It operates on the systems that customers use.
 
-**Generative tools** (`bash`, code execution, generic HTTP): Environment becomes the capability boundary. The agent can install packages, spin up processes, reach new services — whatever the substrate allows.
+For these agents, the Environment is the primary control of the damage.
+Guardrails add a second layer of control at the tool boundary.
 
-```
-Specific tools:    capability = Σ(tool schemas)
-Generative tools:  capability = f(environment)
-```
+For an agent with generative tools, the Environment sets the correct limit of
+its operations. Guardrails on `bash` find the patterns of commands that you know
+at the start. The sandbox sets the limits of the operations that the agent can
+do, also if it goes around each Guardrail.
 
-This is why Environment design matters most for agents with generative tools. A coding agent with `bash` in a fresh container has a radically different capability surface than the same agent with `bash` on the user's laptop. Sandboxing is how you bound that capability when you can't bound the tool.
+Companies also make the Environment a product for their customers. "Give agents
+a reliable, isolated Linux in one second" is the message of the cloud
+Environments of OpenAI Codex, e2b, Modal and Cloudflare. The Environment layer
+is where these properties come together: it isolates the agent, it is fast, and
+each run gives the same result.
 
----
+<a id="environment-and-the-rest-of-the-theory"></a>
 
-## Environment and the Rest of the Theory
+## Environment and the other concepts
 
-- **[Tool](../primitives/tool.md)**: Tools are the interface to Environment. Specific tools expose a narrow window; generative tools expose a wide one.
-- **[Guardrail](../harness/guardrail.md)**: Guardrails enforce at the tool boundary; Environment enforces at the substrate boundary. Both layers compose — Guardrails are tool-level policy, Environment is substrate-level containment.
-- **[Agent](../harness/agent.md)**: an Agent wires a Session to an Environment through a Frontend. Two Agents built from the same Session with different Environments are different Agents in practice.
-- **[Workspace](../patterns/workspace.md)**: A Workspace is a hierarchical Tool-set _over_ an Environment's filesystem. Workspace is the agent-side abstraction; Environment is what the Workspace sits on.
-- **[Continuity](../patterns/continuity.md)**: The `bootstrap` tool in Continuity is an Environment-setup step — it brings the Environment from cold state to working state at session start.
-
-## Design Implications
-
-**For agent builders**: Choose Environment deliberately. The default "my laptop, full access" is often wrong for anything beyond personal use. If the agent handles untrusted input, runs third-party code, or operates on production systems, the Environment is your primary blast-radius control — not the Guardrails.
-
-**For security-conscious builders**: Treat Environment as the true capability boundary for generative-tool agents. Guardrails on `bash` catch the patterns you anticipated; the sandbox defines what the agent _could_ do even if it bypassed every Guardrail.
-
-**For platform builders**: The Environment is increasingly a product. "Give agents a reliable, isolated Linux in one second" is the pitch of OpenAI Codex's cloud workspace, e2b, Modal, Cloudflare Workers for agents. The Environment layer is where isolation, speed, and reproducibility meet.
-
----
+- **[Tool](../primitives/tool.md)**: Tools are the interface to the Environment.
+  A specific tool gives access to a small part of the Environment. A generative
+  tool gives access to a large part.
+- **[Guardrail](../harness/guardrail.md)**: Guardrails apply limits at the tool
+  boundary. The Environment applies limits at the boundary of the resources. The
+  two layers operate together. The Guardrails give policies at the tool level,
+  and the Environment holds the agent at the resource level.
+- **[Agent](../harness/agent.md)**: An Agent connects a Session to an
+  Environment through a frontend. Two Agents with the same Session and different
+  Environments are different Agents.
+- **[Workspace](../patterns/workspace.md)**: A Workspace is a set of tools with
+  a tree of names on the filesystem of an Environment. The Workspace is the view
+  of the agent. The Environment is the layer below the Workspace.
+- **[Continuity](../patterns/continuity.md)**: The `bootstrap` tool of
+  Continuity is a setup step for the Environment. At the start of a Session, it
+  changes the Environment from a cold condition to a condition for work.
 
 ## Related
 
-- [Tool](../primitives/tool.md) — the interface through which the agent reaches Environment
-- [Guardrail](../harness/guardrail.md) — tool-boundary constraints that compose with Environment-boundary containment
-- [Agent](../harness/agent.md) — wires a Session to a specific Environment via a Frontend
-- [Workspace](../patterns/workspace.md) — hierarchical Tool-set over an Environment's filesystem
+- [Tool](../primitives/tool.md): the interface that the agent uses to operate on
+  the Environment
+- [Guardrail](../harness/guardrail.md): limits at the tool boundary that operate
+  together with the limits of the Environment
+- [Agent](../harness/agent.md): connects a Session to one Environment through a
+  frontend
+- [Workspace](../patterns/workspace.md): a set of tools with a tree of names on
+  the filesystem of an Environment

@@ -1,14 +1,35 @@
 # Seams
 
-A seam is a primitive boundary where one implementation can be substituted for another without changing the rest of the system. Every agent system is a composition of primitives, and every composition point is a seam.
+A seam is a point in an agent system where you can replace one part with a
+different part. The other parts of the system do not change. For example, a test
+can replace the LLM with a mock that always gives the same output. An agent
+system is a composition of primitives, and each point of this composition is a
+**seam**.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-The compositional nature of agent systems — the fact that they're assembled from discrete, substitutable primitives — is what makes them testable at all. A monolithic agent with no seams would be a black box. An agent built from primitives is a composition of individually verifiable components with a non-deterministic core that requires statistical verification.
+## Value
 
-Every verification [strategy](strategies.md) works by substituting at a seam: replacing the LLM with a mock, pre-populating a channel with fixture data, swapping a tool for a recording fake. Knowing where the seams are tells you where tests can attach.
+Seams make it possible to do tests of an agent system. An agent system is made
+of small parts that a test can replace. If an agent had no seams, a test could
+examine only its input and its output. An agent with seams is a set of parts,
+and a test can examine each part one at a time. Only its core is not
+deterministic, and the verification of this core must use the results of many
+runs.
 
-## The Primitive Seams
+Each [verification method](strategies.md) replaces a part at a seam. For
+example:
+
+- It replaces the LLM with a mock.
+- It puts test data into a Channel before the run.
+- It replaces a tool with a mock that records each call.
+
+When you know where the seams are, you know where a test can connect to the
+system.
+
+<a id="the-primitive-seams"></a>
+
+## The seams of the concepts
 
 ```
 AgentLoop = LLM + Tool[]
@@ -27,45 +48,68 @@ Workspace = filesystem operations
              ↑ seam: use a temporary directory with fixture data
 ```
 
-## The LLM Seam
+<a id="the-llm-seam"></a>
 
-The most important seam in any agent system is between the [LLM](../primitives/llm.md) and everything else. The LLM is the only non-deterministic primitive. Everything else — tool execution, channel reads/writes, guardrail checks, state machine transitions — is deterministic.
+## The LLM seam
+
+The most important seam of each agent system is between the
+[LLM](../primitives/llm.md) and all other parts. The LLM is the only primitive
+that is not deterministic. All the other parts are deterministic:
+
+- the tool calls
+- the operations that read and write the Channels
+- the checks of the Guardrails
+- the phase changes of the StateMachine.
 
 ```typescript
-// The LLM seam: a protocol that any implementation can satisfy
+// The LLM seam: a protocol that each implementation can obey
 type LlmCall = (
   system: string,
   messages: Message[],
 ) => AsyncStream<TextDelta | ToolCall>;
 
-// Production: real model
+// Live system: the actual model
 const realLlm: LlmCall = (system, messages) =>
   anthropic.stream({ model: "claude-sonnet", system, messages });
 
-// Test: deterministic mock
+// Test: a deterministic mock
 const mockLlm: LlmCall = (system, messages) =>
   Stream.of({ type: "text", text: "Mock response." });
 
-// Test: recorded replay
+// Test: gives again the outputs of a recorded trace
 const replayLlm: LlmCall = (system, messages) =>
   playbackFromTrace(recordedTrace, messages);
 ```
 
-Replacing the real LLM with a mock splits the system into two halves:
+If you replace the LLM with a mock, the system divides into two parts:
 
-- **Deterministic shell**: tool execution, data transforms, channel I/O, prompt assembly, output writing, state transitions. Testable with conventional techniques.
-- **Non-deterministic core**: LLM reasoning, tool selection, output generation. Requires different strategies (evals, property assertions, trajectory checks).
+- **The deterministic shell.** This part holds the tool calls, the changes to
+  the data and the input and output of the Channels. It also holds the assembly
+  of the Prompt, the output files and the phase changes. Usual software tests
+  can examine it.
+- **The core that is not deterministic.** This part holds the reasoning of the
+  LLM, the selection of the tools and the text that the LLM gives. It must have
+  different verification methods, for example evals, checks of the properties of
+  the output, and checks of the sequence of steps.
 
-**You test the shell with mocks, and the core with evals.** The two are complementary, not alternatives.
+**Use mocks for the tests of the shell, and use evals for the tests of the
+core.** The two types of test operate together. One type does not replace the
+other type.
 
-## The Channel Seam
+<a id="the-channel-seam"></a>
 
-In multi-agent pipelines, the [Channel](../patterns/channel.md) between agents is a natural seam. Each channel write produces an artifact; each channel read consumes one. You can verify each agent in isolation by pre-populating its input channel and asserting on its output channel.
+## The Channel seam
+
+If two or more agents operate in a pipeline, the
+[Channel](../patterns/channel.md) between two agents is a seam. Each operation
+that writes to a Channel makes an item. Each operation that reads from a Channel
+uses an item. Thus a test can examine each agent without the other agents. Put
+test data into its input Channel. Then examine the items in its output Channel.
 
 ```typescript
-// Test Agent B in isolation:
+// Test agent B alone:
 const inputChannel = createChannel();
-inputChannel.write("notes/topic-1.md", fixtureNote); // pre-populated
+inputChannel.write("notes/topic-1.md", fixtureNote); // test data, put in before the run
 
 const outputChannel = createChannel();
 await agentB.run({ input: inputChannel, output: outputChannel });
@@ -73,11 +117,18 @@ await agentB.run({ input: inputChannel, output: outputChannel });
 assert(outputChannel.read("analysis.md").includes("key finding"));
 ```
 
-This works for any channel variant — filesystem, shared state, artifact store.
+This method operates with each type of Channel: a filesystem, data that all the
+agents can read and write, or a store of items.
 
-## The Tool Boundary Seam
+<a id="the-tool-boundary-seam"></a>
 
-[Tools](../primitives/tool.md) are side effects. In production, a tool might call an external API, write to a database, or execute a shell command. In tests, tools are the outermost seam — you can replace them with fakes that record what was called and return canned results.
+## The Tool seam
+
+A [Tool](../primitives/tool.md) has side effects: it changes items that are
+external to the LLM. In the live system, a tool can call an external API, write
+to a database or run a shell command. In a test, the tools are the outer seam of
+the system. A test can replace each tool with a mock. Each call goes to the
+mock. The mock writes the call to a log and gives a prepared result.
 
 ```typescript
 const fakeTools: Tool[] = [
@@ -97,22 +148,24 @@ const fakeTools: Tool[] = [
   },
 ];
 
-// After the agent runs, assert on what tools were called:
+// After the agent runs, check the tool calls:
 assert(callLog.some((c) => c.tool === "query_database"));
 assert(
   callLog.find((c) => c.tool === "write_file")?.params.path === "report.md",
 );
 ```
 
-This verifies the agent's _decisions_ — did it call the right tools with the right parameters? — without executing real side effects.
-
----
+This test examines the decisions of the agent: did it call the correct tools
+with the correct parameters? The tools do not change files, databases or other
+systems during the test.
 
 ## Related
 
-- [Verification](index.md) — the orthogonal concern that uses seams
-- [Trace](trace.md) — what substituted components produce for inspection
-- [Strategies](strategies.md) — the techniques that exploit seams
-- [LLM](../primitives/llm.md) — the primitive behind the most important seam
-- [Channel](../patterns/channel.md) — inter-agent seams in multi-agent pipelines
-- [Tool](../primitives/tool.md) — the outermost substitution boundary
+- [Verification](index.md): the work that uses the seams. Verification is not a
+  tier, and it applies to all the tiers.
+- The [trace](trace.md): the data that the replaced parts give to the test.
+- The [verification methods](strategies.md): the tests that use the seams.
+- The [LLM](../primitives/llm.md): the most important seam is between the LLM
+  and all other parts.
+- [Channel](../patterns/channel.md): the seams between agents in a pipeline.
+- [Tool](../primitives/tool.md): the outer seam of the system.

@@ -1,21 +1,41 @@
 # Planner
 
-A Planner is a [Session](../harness/session.md) configured with read-only tools and a system prompt that requires structured output — a plan, not an implementation. It is the pattern behind every system where the agent first thinks, then acts.
+A Planner is an agent that examines a task and writes a plan, but does not
+change the code or the files. It is a [Session](../harness/session.md) with
+tools that only read and a system prompt that tells the LLM to write a plan in a
+specified structure. Each system in which the agent first thinks and then does
+the work uses this pattern.
 
-**Composition**: Session + constraint (read-only tools + structured output prompt).
+**Composition**: Session + limits (read-only tools + a system prompt that tells
+the LLM to write a plan in a specified structure).
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-Letting an agent immediately start writing code or making changes is risky for non-trivial tasks. The agent may misunderstand the problem, miss important context, or take an approach that contradicts existing architecture. A Planner forces the agent to explore the codebase and propose a structured plan _before_ any writes happen. The plan can be reviewed by a human, by an [Evaluator](evaluator.md), or by a [StateMachine](state-machine.md) guard before execution proceeds.
+## Value
 
-## Formal Definition
+A Planner lets a person or a system examine the method of an agent before the
+agent changes a file. If a task is not small, an agent that starts to write code
+immediately can cause problems:
+
+- It can read the problem incorrectly.
+- It can ignore important context.
+- It can select a method that does not agree with the structure of the code.
+
+A Planner makes the agent examine the code and write a plan in a specified
+structure before it writes a file. Then a person, an [Evaluator](evaluator.md)
+or a rule of a [StateMachine](state-machine.md) can examine the plan before the
+work continues.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
-// Planner is an AgentLoop with a specific configuration:
-// read-only tools + system prompt requiring structured output
+// A Planner is a Session with read-only tools
+// and a system prompt that asks for a plan in a fixed structure.
 const planner = createSession({
   llm: claude_sonnet,
-  tools: [fileRead, grep, glob], // read-only! Doesn't write code.
+  tools: [fileRead, grep, glob], // read-only: it does not write code
   system: `You are an architect. Given a task:
     1. Explore the codebase
     2. Propose an implementation plan as a list of steps
@@ -23,36 +43,48 @@ const planner = createSession({
     DO NOT write code. Plan only.`,
 });
 
-// Usage:
+// Use:
 const plan = await planner.send("reuse timeline on details page");
-// plan = structured text with steps
+// plan = text with steps in a fixed structure
 ```
 
-Planner is a Session with a specific configuration (read-only tools + system prompt requiring structured output). Claude Code plan mode, Codex reasoning — all implement this pattern.
+Examples of this pattern are the plan mode of Claude Code and the reasoning step
+of Codex.
 
----
+<a id="planner-in-context"></a>
 
-## Planner in Context
+## The Planner as a phase
 
-Planner typically appears as a phase in a [StateMachine](state-machine.md):
+Usually, the Planner is one phase of a [StateMachine](state-machine.md):
 
 ```typescript
 {
   phases: {
     plan: { tools: readOnlyTools, system: planningPrompt },   // Planner
-    approve: { trigger: "human_approval" },                   // gate
+    approve: { trigger: "human_approval" },                   // a person approves the plan
     implement: { tools: allTools, system: implementPrompt },  // full access
   }
 }
 ```
 
-The value of Planner is not just in the plan itself, but in the separation of concerns it enables: the planning phase uses cheap, fast, read-only operations to explore the problem space; the implementation phase uses expensive, slower, write-capable tools to execute. This separation maps naturally to model routing — planning might use a cheaper model, implementation a more capable one (see [Router](router.md)).
+The plan is not the only value of a Planner. The Planner also divides the work
+into two phases with different tools:
 
----
+- The plan phase examines the problem with read-only operations. These are fast
+  operations with a low cost.
+- The implementation phase does the work with tools that can write. These tools
+  are slower and their cost is higher.
+
+Thus, the two phases can use different models. The plan phase can use a model
+with a lower cost, and the implementation phase can use a stronger model. A
+[Router](router.md) can select the model for each phase.
 
 ## Related
 
-- [Session](../harness/session.md) — the harness layer that Planner constrains
-- [StateMachine](state-machine.md) — Planner is typically one phase in a multi-phase workflow
-- [Router](router.md) — may select different models for planning vs. implementation
-- [Evaluator](evaluator.md) — may assess the quality of a plan before approving execution
+- [Session](../harness/session.md): the harness that the Planner puts limits on
+- [StateMachine](state-machine.md): the Planner is usually one phase of a
+  workflow with two or more phases
+- [Router](router.md): can select different models for the plan and for the
+  implementation
+- [Evaluator](evaluator.md): can examine the quality of a plan before the work
+  starts

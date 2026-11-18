@@ -1,22 +1,58 @@
 # StateMachine
 
-A StateMachine defines phases with different capabilities and explicit transition rules between them, including human checkpoints. It is what separates a single continuous conversation from a structured workflow with distinct stages, verification gates, and rollback points.
+A StateMachine divides the work of an agent into phases. Each phase gives the
+agent a different set of tools, and rules tell when the agent can go to the next
+phase. A person can give the approval for a change of phase. For example, a
+coding agent first reads the code, then waits for the approval of a person, and
+only then can write files.
 
-**Composition**: [Guardrail](../harness/guardrail.md) + a phase variable + transition rules. Each phase is a [Session](../harness/session.md) configuration (its own tool-set, system prompt, guardrails). The phase variable lives outside the LLM's control; Guardrails consult it at each tool call to decide what is allowed in the current phase; transitions are triggered by explicit events (human approval, evaluator verdict, timeout).
+**Composition**: [Guardrail](../harness/guardrail.md) + a variable that holds
+the phase + rules for the change of phase. Each phase is a
+[Session](../harness/session.md) configuration with its tools, its system prompt
+and its Guardrail policies. The LLM cannot change it. At each tool call, the
+Guardrail reads the variable and lets only the tools of the active phase
+operate. Only an external input changes the phase. Examples are the approval of
+a person, the result of an Evaluator and a timeout.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-A [Session](../harness/session.md) is one continuous conversation — the agent has the same tools and the same authority from start to finish. Real workflows need phases: first explore the code (read-only), then get human approval, then implement (full access), then verify (run tests), then deliver (create PR). Each phase has different tools, different permissions, and different success criteria. Transitions between phases may require human approval, evaluation results, or guard conditions.
+## Value
 
-Without StateMachine, you either build a single all-powerful agent (risky — it can write code before understanding the problem) or manually orchestrate phases by running separate agents and coordinating them yourself. StateMachine is what makes multi-phase workflows first-class — and arguably the main missing piece for transitioning from "agent in terminal" to "agent as CI/CD pipeline."
+A StateMachine changes one long conversation into a workflow with steps, checks
+and points to go back to. Without a StateMachine, the agent has the same tools
+and the same permissions from the start of the Session to its end.
 
-## Formal Definition
+A usual workflow to write code has these phases:
+
+1. Read the code and make a plan. The agent can only read.
+2. Wait for the approval of a person.
+3. Write the code. The agent has full access.
+4. Run the tests to make sure that the code operates correctly.
+5. Make a pull request.
+
+Each phase has different tools, different permissions and a different result
+that shows the end of the phase. A change of phase can wait for the approval of
+a person, for the result of an Evaluator or for a guard.
+
+Without a StateMachine, you have two options:
+
+- One agent with all the tools. This is dangerous, because the agent can write
+  code before it knows the problem.
+- Two or more agents that you start and control, one for each phase.
+
+A StateMachine lets a system give a workflow of phases directly. It is the part
+that changes an agent in a terminal into an agent that operates as a CI/CD
+pipeline.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type Phase = "plan" | "approve" | "implement" | "verify" | "deliver";
 
-// A per-phase Session configuration: which tools and system prompt apply
-// while the StateMachine is in this phase.
+// The Session configuration of one phase: the tools and the system prompt
+// that apply while the StateMachine is in this phase.
 type PhaseConfig = {
   tools: Tool[];
   system: string;
@@ -26,8 +62,8 @@ type Transition = {
   from: Phase;
   to: Phase;
   trigger: "auto" | "human_approval" | "evaluation_passed" | "timeout";
-  // Optional guard: inspects ambient state (progress log, evaluator verdict,
-  // user flags) to decide whether the transition fires.
+  // Optional guard: reads the state around the agent (progress log,
+  // Evaluator result, user flags) and tells if the transition can occur.
   guard?: (state: Record<string, unknown>) => boolean;
 };
 
@@ -35,15 +71,18 @@ type StateMachine = {
   phases: Record<Phase, PhaseConfig>;
   transitions: Transition[];
   currentPhase: Phase;
-  advance: (trigger: string) => Phase; // move to next phase
+  advance: (trigger: string) => Phase; // move to the next phase
 };
 ```
 
-Each phase is essentially a different [Session](../harness/session.md) configuration — different tools, different system prompt, different output target. The StateMachine manages the progression between these configurations according to explicit rules.
+Each phase is a different [Session](../harness/session.md) configuration, with
+different tools, a different system prompt and a different output. The
+StateMachine moves the agent from one configuration to the next configuration
+with the rules for the change of phase.
 
----
+<a id="full-workflow-example"></a>
 
-## Full Workflow Example
+## Example of a full workflow
 
 ```typescript
 const developmentWorkflow: StateMachine = {
@@ -51,11 +90,11 @@ const developmentWorkflow: StateMachine = {
     plan: {
       tools: [fileRead, grep, glob], // read-only
       system: "Explore the code, propose a plan",
-      output: "github_comment", // plan goes to issue comment
+      output: "github_comment", // the plan goes to an issue comment
     },
     approve: {
-      tools: [], // agent doesn't work
-      trigger: "human_approval", // waits for human comment
+      tools: [], // the agent does not work
+      trigger: "human_approval", // waits for a comment from a person
     },
     implement: {
       tools: [fileRead, fileWrite, bash], // full access
@@ -65,8 +104,8 @@ const developmentWorkflow: StateMachine = {
     verify: {
       tools: [bash, screenshot],
       system: "Run tests, check visuals",
-      evaluator: visualEvaluator, // Evaluator as part of phase
-      onFail: "implement", // return to implementation
+      evaluator: visualEvaluator, // an Evaluator as part of the phase
+      onFail: "implement", // go back to implementation
     },
     deliver: {
       tools: [bash], // gh pr create
@@ -83,100 +122,21 @@ const developmentWorkflow: StateMachine = {
 };
 ```
 
-Claude Code plan mode is a degenerate StateMachine with two states (plan → implement). GitHub Action runs are single-pass with no states. But a full workflow requires an arbitrary graph with branching, rollbacks, and human checkpoints.
+Known systems show different levels of this pattern:
 
----
+- The plan mode of Claude Code is a small StateMachine with only two phases:
+  first a plan, then the code.
+- A run of a GitHub Action has no phases. It does its work one time, from the
+  start to the end.
+- A full workflow must have a graph of phases with branches, steps back and
+  approvals of persons.
 
-## Implementation Approaches: Graph vs. Imperative
+<a id="anti-pattern-prompt-enforced-orchestration"></a>
 
-There are two fundamentally different ways to implement a StateMachine:
+## Phase sequence in the prompt only
 
-**Declarative graph** (e.g., LangGraph, Google ADK): Define nodes and edges, compile to a runnable. The topology is declared at build time. Transitions are explicit edges. Conditional routing uses edge condition functions.
-
-**Imperative workflow** (e.g., durable execution engines, raw code): Write regular code with explicit phase tracking. The topology emerges from control flow. Transitions are function calls or state updates.
-
-Both implement the same abstraction — phases, transitions, guards. The trade-offs:
-
-| Property        | Graph                                            | Imperative                     |
-| --------------- | ------------------------------------------------ | ------------------------------ |
-| Visualization   | Built-in — the graph IS the diagram              | Requires separate tooling      |
-| Static analysis | Possible — can verify reachability, dead states  | Hard — topology is dynamic     |
-| Dynamic routing | Awkward — requires workarounds for runtime paths | Natural — just write `if/else` |
-| Complex logic   | Forced into edge condition functions             | Regular code                   |
-| Tooling         | Strong — visual editors, debuggers               | Weak — it's just code          |
-
-The natural split: graph-based for agent-internal routing (fixed topology, benefits from visualization). Imperative for system-level orchestration (dynamic topology, benefits from code flexibility).
-
----
-
-## Checkpointing and Durability
-
-StateMachine phases are natural checkpointing boundaries. If the system crashes mid-workflow, you want to resume from the last completed phase rather than restarting from scratch.
-
-Checkpointing granularity matters:
-
-- **Per-phase**: Completed phases survive a crash. Partial work inside a phase is lost — the phase re-executes from the start on resume. Requires phases to be idempotent.
-- **Per-activity**: Each unit of work within a phase survives independently. Finer recovery, but heavier infrastructure.
-
-The granularity determines how much work you lose on failure and what idempotency guarantees your code must provide. Choose based on the cost of re-execution: if a phase takes 5 seconds of LLM calls, per-phase is fine. If a phase takes 30 minutes of API calls and data processing, per-activity may be necessary.
-
----
-
-## Human-in-the-Loop as Interrupt/Resume
-
-Human checkpoints in StateMachine follow a universal mechanism: **pause → persist state → wait → resume**.
-
-```typescript
-// The human-in-the-loop transition
-{
-  from: "plan",
-  to: "implement",
-  trigger: "human_approval",
-  // Mechanism: serialize current state, suspend execution,
-  // wait for external signal, deserialize state, continue
-}
-```
-
-On resume, the system must decide what re-executes. If the entire phase re-executes (as in some graph-based implementations), the phase must be idempotent — calling the same APIs twice must produce the same result. If only the continuation after the pause point executes, the checkpoint must capture the exact execution state.
-
-The mechanism is always the same; the implementation details (what re-executes, what must be idempotent) determine correctness.
-
----
-
-## The Cognitive / Execution Layer Split
-
-StateMachine phases expose a fundamental divide in agent systems:
-
-| Layer         | What it does                                  | Hard problem                       |
-| ------------- | --------------------------------------------- | ---------------------------------- |
-| **Cognitive** | LLM calls, tool selection, reasoning, routing | Non-determinism, prompt iteration  |
-| **Execution** | API calls, database writes, payments          | Reliability, retries, compensation |
-
-A phase that involves only LLM reasoning (planning, analysis) has different infrastructure needs than a phase that involves real-world actions (booking, payment, deployment). The cognitive layer needs prompt iteration and evaluation. The execution layer needs retries, compensation logic, and idempotency guarantees.
-
-This determines what infrastructure a system needs:
-
-- **Cognitively complex, execution-simple** (chatbots, research agents, coding assistants) → a cognitive framework managing both layers is sufficient
-- **Cognitively simple, execution-complex** (booking agents, payment flows) → a durable execution engine is sufficient
-- **Both complex** → the layers compose: cognitive framework manages reasoning, execution phases invoke durable workflows for dangerous operations
-
-**The durability principle**: durability boundaries should match blast radius. An LLM hallucinating costs a retry. A double-charged credit card costs money and trust. Match reliability machinery to consequence of failure.
-
----
-
-## Concern-Bundling vs. Separation
-
-Some frameworks (e.g., [LangGraph](../case-studies/langgraph.md)) bundle orchestration (graph routing, checkpointing), state management (shared state + persistence), and execution (tool use, business logic) into a single library. The alternative is full separation: dedicated orchestration, dedicated state management, dedicated execution engines.
-
-Bundling works well for **cognitively complex, execution-simple systems** — when there's nothing dangerous to make durable (no payments, no external API calls requiring compensation), a separate orchestrator is overhead. Separation becomes necessary when execution complexity grows: system-level scheduling, cross-service coordination, or durable execution guarantees on business operations.
-
-The correct choice depends on where the system sits on the cognitive/execution complexity spectrum. Neither approach is universally right — but knowing which trade-off you're making prevents architectural surprises as the system grows.
-
----
-
-## Anti-Pattern: Prompt-Enforced Orchestration
-
-A common shortcut: encode phase ordering entirely in the orchestrator's system prompt instead of code.
+Some systems write the sequence of the phases only in the system prompt of the
+primary agent, and not in code.
 
 ```
 # lead_agent.txt (prompt excerpt)
@@ -186,25 +146,41 @@ STEP 4: SPAWN DATA-ANALYST SUBAGENT
 STEP 5: SPAWN REPORT-WRITER SUBAGENT
 ```
 
-This is a degenerate StateMachine — all transitions are "auto," there are no guards, no verification that the previous phase succeeded. The LLM's sequential reasoning is the only thing enforcing order.
+This is a StateMachine with no control. Each change of phase is automatic, and
+no guard examines it. No code makes sure that the previous phase was correct.
+Only the reasoning of the LLM keeps the phases in sequence.
 
-**Failure modes**:
+These errors can occur, and no part of the system stops them:
 
-- Model skips a phase (decides analyst isn't needed) — nothing catches it
-- Phase produces empty or garbage output — pipeline continues with it
-- Model reorders phases — no code-level constraint prevents it
+- The model does not do a phase, because it thinks that the phase is not
+  necessary. For example, it does not start the `DATA-ANALYST` subagent.
+- A phase gives an empty or bad output, and the pipeline continues with it.
+- The model changes the sequence of the phases.
 
-A subtler variant appears in graph-based frameworks: conditional edges decided by LLM calls without state guards.
+### The LLM as the guard
+
+The same problem occurs in a different shape in graph frameworks. An edge with a
+condition looks as a rule in code, but an LLM call makes the decision.
 
 ```typescript
-// Looks like code-level routing, but is actually prompt-enforced:
+// Looks like routing in code, but the prompt controls it:
 graph.add_conditional_edges("verify", (state) => llm("should we proceed?"));
 ```
 
-The guard is non-deterministic. There's no structural guarantee the LLM routes correctly. For production systems, edge conditions should check state (data-driven), not ask the LLM (hope-driven).
+This guard can give a different result for the same input. The structure does
+not make sure that the LLM selects the correct edge. In a production system, the
+condition of an edge must examine the data of the workflow. It must not get the
+decision from the LLM.
 
-**When prompt-enforced orchestration is acceptable**: Prototyping, demos, low-stakes pipelines where approximate ordering is fine.
-**When it breaks**: Anything where you need guarantees. Add code-level guards:
+### When to use it
+
+A phase sequence in the prompt only is satisfactory for some systems:
+
+- first versions of a system
+- examples that you show to persons
+- pipelines where small errors in the sequence are not important.
+
+If the system must make sure of the sequence, add guards in code:
 
 ```typescript
 { from: "research", to: "analyze",
@@ -212,12 +188,158 @@ The guard is non-deterministic. There's no structural guarantee the LLM routes c
   trigger: "auto" }
 ```
 
----
+<a id="implementation-approaches-graph-vs-imperative"></a>
+
+## Graph or code
+
+There are two methods to make a StateMachine. The two methods give the same
+result: phases, changes of phase and guards.
+
+- **Graph**, for example LangGraph and Google ADK. You declare nodes and edges
+  and compile them into a program that runs. You give the shape of the graph
+  before the program runs. Each change of phase is an edge. A function on an
+  edge selects the next node.
+- **Code**, for example durable execution engines or usual code. You write usual
+  code that records the active phase. The flow of the code makes the shape. Each
+  change of phase is a function call or a change of a variable.
+
+| Property             | Graph                                  | Code                          |
+| -------------------- | -------------------------------------- | ----------------------------- |
+| Visual graph         | Included: the code is the graph        | Other tools are necessary     |
+| Analysis before run  | Possible: can find nodes with no path  | Hard: the shape can change    |
+| Routing at run time  | Hard: special code is necessary        | Easy: write `if/else`         |
+| Large decisions      | Must go into edge functions            | Usual code                    |
+| Tools for developers | Good: visual tools to change and debug | Small number: it is only code |
+
+Usually, a graph is better for the routing in an agent. The shape of that
+routing does not change, and a visual graph helps. Code is better for the
+control of a full system. Its shape can change, and code is more flexible.
+
+<a id="checkpointing-and-durability"></a>
+
+## Checkpoints
+
+Each phase is a good point for a checkpoint. If the system stops because of a
+crash in a workflow, it can continue from the last completed phase. It does not
+start again from the start.
+
+The quantity of work between two checkpoints is important:
+
+- **A checkpoint for each phase.** A completed phase stays after a crash. The
+  system does again the work of a phase that is not completed. That phase starts
+  again from its start, thus each phase must have idempotency.
+- **A checkpoint for each step.** Each unit of work in a phase stays after a
+  crash. After a crash, the system must do a smaller quantity of work again, but
+  the infrastructure is larger.
+
+This quantity tells how much work the system does again after a crash. It also
+tells which idempotency your code must give. Select the quantity from the time
+of a second run:
+
+- If a phase uses 5 seconds of LLM calls, a checkpoint for each phase is
+  sufficient.
+- If a phase uses 30 minutes of API calls and operations on data, a checkpoint
+  for each step can be necessary.
+
+<a id="human-in-the-loop-as-interruptresume"></a>
+
+## Approval of a person
+
+Each approval of a person in a StateMachine uses the same mechanism. The system
+stops, keeps the data of the workflow, waits and continues.
+
+```typescript
+// The transition that waits for a person
+{
+  from: "plan",
+  to: "implement",
+  trigger: "human_approval",
+  // Mechanism: save the current state, stop execution,
+  // wait for an external signal, load the state, continue
+}
+```
+
+When the system continues, it must select which work runs again:
+
+- If all the phase runs again, as in some graph frameworks, the phase must have
+  idempotency. Two calls to the same APIs must give the same result.
+- If only the work after the point where the run stopped continues, the
+  checkpoint must keep the accurate condition of the run.
+
+The mechanism is always the same. Two decisions tell if the system operates
+correctly: which work runs again, and which work must have idempotency.
+
+<a id="the-cognitive--execution-layer-split"></a>
+
+## Reasoning and operations
+
+The phases of a StateMachine show two different layers of an agent system:
+
+| Layer      | Function                                      | Hard problem                           |
+| ---------- | --------------------------------------------- | -------------------------------------- |
+| Reasoning  | LLM calls, tool selection, reasoning, routing | Outputs that change, prompt changes    |
+| Operations | API calls, changes to a database, payments    | Correct results, retries, compensation |
+
+Phases with only LLM reasoning and phases with external operations must have
+different infrastructure. A plan and an analysis are examples of LLM reasoning.
+A reservation, a payment and a deployment are examples of external operations.
+The reasoning layer must have changes to prompts and checks of the outputs. The
+operation layer must have retries, compensation and idempotency.
+
+The layers tell which infrastructure a system must have:
+
+- **Hard reasoning and easy operations**, for example chat assistants, research
+  agents and coding agents. A framework of agents that controls the two layers
+  is sufficient.
+- **Easy reasoning and hard operations**, for example reservation agents and
+  payment flows. A durable execution engine is sufficient.
+- **Hard reasoning and hard operations.** The layers compose. The framework of
+  agents controls the reasoning. Phases that do dangerous operations call a
+  durable execution engine.
+
+Make the protection of each step agree with the damage that an error of the step
+can cause. If the LLM makes up a fact, one retry corrects it. If the system
+makes the same payment two times, the company must give the money back. Also,
+the trust of the customer decreases.
+
+<a id="concern-bundling-vs-separation"></a>
+
+## One library or different services
+
+Some frameworks, for example [LangGraph](../case-studies/langgraph.md), put
+these functions into one library:
+
+- orchestration: the routing of the graph and the checkpoints
+- the data of the workflow: the data that all nodes use, and its storage
+- the work: the tool calls and the code of the product.
+
+The other option is to keep them apart, with a different service for each of
+these functions.
+
+One library is good for systems with hard reasoning and easy operations. Some
+systems have no dangerous operations that must have durable execution, for
+example payments or external API calls that must have compensation. In these
+systems, a different orchestration service only adds work. Different services
+become necessary when the operations become harder. Examples are these:
+
+- The system must schedule work across all its parts.
+- The system must control the work of two or more services.
+- The operations of the company must have durable execution.
+
+The correct selection comes from the position of the system between hard
+reasoning and hard operations. Each option is correct for some systems. If you
+know which option you selected, you prevent problems when the system becomes
+larger.
 
 ## Related
 
-- [Session](../harness/session.md) — a single continuous conversation; StateMachine chains multiple Sessions with different configurations
-- [Guardrail](../harness/guardrail.md) — constrains actions within a phase; StateMachine constrains transitions between phases
-- [Evaluator](evaluator.md) — often used as a transition trigger (`evaluation_passed` / `evaluation_failed`)
-- [Agent](../harness/agent.md) — StateMachine is a key component of production Agents
-- [LangGraph case study](../case-studies/langgraph.md) — a framework built around StateMachine as a product
+- [Session](../harness/session.md): one continuous conversation. A StateMachine
+  connects two or more Sessions with different configurations.
+- [Guardrail](../harness/guardrail.md): controls the operations in a phase. A
+  StateMachine controls the changes between phases.
+- [Evaluator](evaluator.md): its result frequently starts a change of phase
+  (`evaluation_passed` or `evaluation_failed`).
+- [Agent](../harness/agent.md): a StateMachine is an important part of
+  production Agents.
+- [LangGraph case study](../case-studies/langgraph.md): a framework with the
+  StateMachine as its product.

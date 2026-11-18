@@ -1,30 +1,51 @@
 # Evaluator
 
-An Evaluator uses an LLM (or other assessment mechanism) to judge an agent's output against criteria, optionally feeding the verdict back into a retry loop. It is the pattern that enables self-correction — the qualitative difference between "single pass" and "iterate until good enough."
+An Evaluator examines the output of an agent against a list of conditions and
+gives a verdict. Usually an LLM examines the output, but a different mechanism
+can do it too, and the agent can use the verdict to try again. This pattern lets
+an agent correct its work: the agent does not stop after its first result, but
+continues until the result is good.
 
-**Composition**: LLM + loop (assessment function + feedback cycle).
+**Composition**: LLM + loop (a function that examines the result + a feedback
+cycle).
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-Without an Evaluator, an agent's first attempt is its final answer. With an Evaluator, the agent can iterate: produce a result, assess it, identify issues, fix them, reassess. This creates a **feedback loop** — a closed cycle that qualitatively changes system behavior. All systems that "iterate until result" use this pattern.
+## Value
 
-## Formal Definition
+Without an Evaluator, the first result of an agent is its last result. With an
+Evaluator, the agent can do the work again and again:
+
+1. It makes a result.
+2. The Evaluator examines the result and finds the problems.
+3. The agent corrects the problems.
+4. The Evaluator examines the result again.
+
+This sequence is a **feedback loop**: a closed cycle that changes the operation
+of the system very much. Each system that does the work again until the result
+is good uses this pattern.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type Evaluator = (
-  task: string, // what was wanted
-  result: string, // what was produced
+  task: string, // the result that the user wants
+  result: string, // the result that the agent made
   evidence?: Evidence, // screenshot, tests, diff
 ) => Promise<Verdict>;
 
 type Verdict = {
   pass: boolean;
-  issues: string[]; // what's wrong
-  suggestions: string[]; // how to fix
+  issues: string[]; // the problems
+  suggestions: string[]; // how to correct them
 };
 ```
 
-### Simple Evaluator — one LLM call
+<a id="simple-evaluator--one-llm-call"></a>
+
+### Evaluator with one LLM call
 
 ```typescript
 const codeEvaluator: Evaluator = async (task, result) => {
@@ -37,7 +58,12 @@ const codeEvaluator: Evaluator = async (task, result) => {
 };
 ```
 
-### Visual Evaluator — multimodal
+<a id="visual-evaluator--multimodal"></a>
+
+### Evaluator that examines an image
+
+The LLM of this Evaluator reads text and images. It compares the task with an
+image of the result.
 
 ```typescript
 const visualEvaluator: Evaluator = async (task, result, evidence) => {
@@ -53,17 +79,16 @@ const visualEvaluator: Evaluator = async (task, result, evidence) => {
 };
 ```
 
----
+## The feedback loop
 
-## The Feedback Loop
-
-The Evaluator's power comes from closing the loop:
+An Evaluator gives its full value only when its verdict goes back to the agent.
+This closes the loop:
 
 ```typescript
-// Without Evaluator: single pass
+// Without an Evaluator: one pass
 const result = await coder.send(task);
 
-// With Evaluator: iterations until convergence
+// With an Evaluator: more passes until the result is good
 let result = await coder.send(task);
 for (let i = 0; i < maxRetries; i++) {
   const verdict = await evaluator(task, result, await getScreenshot());
@@ -72,13 +97,17 @@ for (let i = 0; i < maxRetries; i++) {
 }
 ```
 
-Formally, the Evaluator is a composition of LLM + loop. But it produces **emergent behavior** (self-correction) that doesn't exist in any of the base primitives individually. This puts it on the edge between pattern and primitive — it's structurally a composition, but functionally it introduces a qualitatively new capability.
+The structure of the Evaluator is a composition of an LLM and a loop, thus the
+Evaluator is a pattern. But its function is new: the agent corrects its work.
+This function does not occur in the LLM or in the loop if they operate
+independently. It occurs only when they operate together.
 
----
+<a id="evaluator-as-statemachine-trigger"></a>
 
-## Evaluator as StateMachine Trigger
+## The Evaluator in a StateMachine
 
-Evaluators frequently serve as transition triggers in a [StateMachine](state-machine.md):
+Frequently, the verdict of an Evaluator causes the change from one phase to the
+next phase in a [StateMachine](state-machine.md):
 
 ```typescript
 {
@@ -89,17 +118,21 @@ Evaluators frequently serve as transition triggers in a [StateMachine](state-mac
 {
   from: "verify",
   to: "implement",
-  trigger: "evaluation_failed"  // loop back
+  trigger: "evaluation_failed"  // go back and correct the work
 }
 ```
 
-The Evaluator determines whether the workflow advances or loops back for another iteration. This is the self-correction feedback loop expressed as a state transition.
-
----
+The verdict of the Evaluator selects the next phase: the workflow goes forward,
+or it goes back for one more cycle. Thus, the change of phase is the same
+feedback loop.
 
 ## Related
 
-- [LLM](../primitives/llm.md) — the assessment engine in an LLM-as-judge evaluator
-- [AgentLoop](../harness/agent-loop.md) — what the Evaluator wraps with a retry loop
-- [StateMachine](state-machine.md) — Evaluator verdicts often trigger state transitions
-- [Verification](../verification/index.md) — offline deployment of the Evaluator pattern for quality tracking
+- [LLM](../primitives/llm.md): the part that examines the output when an LLM is
+  the Evaluator
+- [AgentLoop](../harness/agent-loop.md): the loop that the Evaluator puts in a
+  cycle of retries
+- [StateMachine](state-machine.md): the verdicts of an Evaluator frequently
+  cause a change of phase
+- [Verification](../verification/index.md): uses the Evaluator pattern after the
+  run, to monitor the quality of an agent

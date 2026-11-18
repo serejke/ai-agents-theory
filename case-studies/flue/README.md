@@ -1,31 +1,168 @@
 # Case Study: Flue
 
-[Flue](https://github.com/withastro/flue) is a TypeScript agent framework whose compilation unit is an _agent harness_ — the whole runtime environment surrounding an LLM (sandbox, filesystem, tools, context, conversation state) — packaged as a deployable HTTP server. It's authored by the Astro team and originated as the workflow tooling inside the Astro GitHub repo.
+[Flue](https://github.com/withastro/flue) is a TypeScript framework that changes
+an agent into an HTTP server that you can deploy. The unit that Flue compiles is
+the full agent harness. This harness holds all the parts around the LLM: the
+sandbox, the filesystem, the tools, the context and the data of the
+conversation. The developers of Astro are the authors of Flue. Flue started as
+the workflow tools of the Astro repository on GitHub.
 
-The framework targets a specific gap. Most agent SDKs are libraries: you import them, wire up an LLM client, manage session state yourself, choose how to deploy. Flue is structured the other way around — a workspace directory (`agents/`, `roles/`, `.agents/skills/`, `AGENTS.md`) compiles via `flue build` into a self-contained Node bundle or Cloudflare Worker. Persistence, SSE streaming, multi-tenancy via session IDs, webhook/cron triggers, and sandbox provisioning are baked into the artifact, not assembled by the user. The relationship to library-style agent SDKs is the same as Next.js's relationship to Express.
+## The output is a server, not a library
 
-![A triage agent: agents/triage.ts, invocable as `flue run triage` or POST /agents/triage/:id — initializes an agent, calls a skill with a valibot result schema, prompts for a comment, and uses session.shell to run git and gh with scoped env.](images/example.png)
+Most agent SDKs are libraries. You import the library and connect an LLM client.
+Then you keep the data of the Session and you select how to deploy.
 
-The image above is the canonical shape of a Flue agent. One file, default-export an async handler taking `{ init, payload, env }`, get a session, drive it with `prompt` / `skill` / `shell`. The same file is reachable two ways without changes — `flue run triage` for CLI/CI invocation and `POST /agents/triage/:id` for the deployed HTTP route — because triggers are declared in the file and the build emits the routing.
+Flue operates in the opposite direction. You write a project folder with
+`agents/`, `roles/`, `.agents/skills/` and `AGENTS.md`. The command `flue build`
+compiles this folder into one Node file or one Cloudflare Worker that contains
+all its code. The output does these tasks, and the user does not add them:
 
-Three properties make Flue worth examining as a case study:
+- It keeps the Sessions in storage.
+- It sends each step to the client with SSE.
+- It keeps the Sessions of each tenant apart with the Session IDs.
+- It starts agents from webhooks and from cron.
+- It makes the sandboxes.
 
-1. **The harness is the deploy unit, not the agent code.** A Flue project compiles to a server. Your handler is ~10 lines; the surrounding harness — session lifecycle, history, compaction, tool dispatch, sandbox lifecycle, transport — is generated.
+Flue has the same relation to agent libraries that the `Next.js` framework has
+to the Express library.
 
-2. **Logic lives in markdown.** `AGENTS.md` becomes the system prompt; `.agents/skills/*/SKILL.md` files become invokable workflows; `roles/*.md` become subagent system-prompt blocks with optional model pins. These are read at session-init from inside the sandbox cwd, so they can come from a mounted filesystem (e.g. an R2 bucket on Cloudflare) and change without redeploying.
+## The shape of a Flue agent
 
-3. **`SessionEnv` as the universal substrate.** A single `exec + fs + cwd + scope` interface that every sandbox mode implements (in-memory just-bash, host filesystem, BashFactory, external connectors like Daytona / Vercel / CF Containers). Built-in tools, skill loading, custom commands, and shell calls all bottom out here, which is what makes "write once, deploy on Node / Cloudflare / GitHub Actions / GitLab CI" tractable rather than aspirational.
+![A triage agent in agents/triage.ts. You can start it with flue run triage or
+with POST /agents/triage/:id. It starts an agent, calls a skill with a schema
+for the result, prompts for a comment, and uses session.shell to run git and gh
+with a limited env.](images/example.png)
 
-The tool surface itself (`read / write / edit / bash / grep / glob / task`) is deliberately the same as Claude Code's, so prompts and skills written for Claude Code port directly. Internally, Flue wraps `@mariozechner/pi-agent-core`'s `Agent` and uses a _scoped-runtime_ pattern — temporarily swapping the agent's tools/model/system-prompt for the duration of one `prompt` / `skill` / `task` call, then restoring — to implement per-call overrides without forking the underlying loop.
+The image shows the usual shape of a Flue agent:
 
-Flue is built directly on top of [PI](../pi.md)'s `@mariozechner/pi-ai` and `@mariozechner/pi-agent-core` — it inherits the LLM/Prompt unification, the AgentLoop, the Guardrail hooks, and Session/compaction, and adds a deploy layer on top (HTTP service Frontend, runtime-pluggable Environment, Topology via `task`, typed-eager skill invocation, Roles, persistent multi-tenant `SessionStore`, per-call scoped overrides, AI-generated connectors). [theory.md](theory.md) walks through what's inherited vs added against the theory's vocabulary.
+1. The agent is one file.
+2. The file exports a default handler. The handler is an `async` function that
+   gets `{ init, payload, env }`.
+3. The handler gets a Session.
+4. The handler operates the Session with `prompt`, `skill` and `shell`.
+
+You can start the same file with two different methods, with no changes:
+
+- `flue run triage` runs the agent from the CLI or from CI.
+- `POST /agents/triage/:id` is the HTTP endpoint of the agent after you deploy
+  it.
+
+This is possible because the file declares its triggers, and the build writes
+the routing.
+
+<a id="three-properties-make-flue-worth-examining-as-a-case-study"></a>
+
+## The important properties of Flue
+
+### The harness is the unit that you deploy
+
+A Flue project compiles to a server. The unit that you deploy is the harness,
+not the agent code. Your handler has approximately 10 lines. Flue writes all the
+harness around it:
+
+- the start, the life and the end of the Session
+- the history and the compaction
+- the tool calls
+- the start, the life and the end of the sandbox
+- the connection to the client.
+
+### The instructions are in Markdown
+
+Flue gets the instructions of the agent from Markdown files:
+
+- `AGENTS.md` becomes the system prompt.
+- Each `.agents/skills/*/SKILL.md` file becomes a workflow that you can call.
+- Each file of `roles/` becomes a block of the system prompt for a subagent. The
+  role can also select a model for the subagent.
+
+Flue reads `AGENTS.md` and the skills when the Session starts, from the folder
+of the Session in the sandbox. Thus these files can come from an external
+filesystem, for example an R2 bucket on Cloudflare. You can change them and not
+deploy again.
+
+### One interface for all sandboxes
+
+`SessionEnv` is one interface with `exec`, `fs`, `cwd` and `scope`. Each type of
+sandbox supplies this interface:
+
+- a `just-bash` shell in memory
+- the filesystem of the host
+- a `BashFactory`
+- external connectors, for example Daytona, Vercel and Cloudflare Containers.
+
+The tools of Flue, the skills, the commands of the user and the shell calls all
+go through `SessionEnv`. Thus you can write an agent one time and deploy it on
+Node, Cloudflare, GitHub Actions or GitLab CI. This interface makes it possible.
+
+## The tools and the scoped runtime
+
+Flue has the same tools as Claude Code: `read`, `write`, `edit`, `bash`, `grep`,
+`glob` and `task`. This is a decision of Flue. Thus the prompts and the skills
+of Claude Code operate in Flue with no changes.
+
+Flue puts the `Agent` of `@mariozechner/pi-agent-core` in its code. It uses a
+method that it calls the scoped runtime. For one call of `prompt`, `skill` or
+`task`, the scoped runtime replaces the tools, the model and the system prompt
+of the `Agent`. After the call, it puts back the previous values. Thus each call
+can have different values, and Flue does not make a second copy of the loop.
+
+## The relation to PI
+
+Flue uses the packages `@mariozechner/pi-ai` and `@mariozechner/pi-agent-core`
+of [PI](../pi.md) directly. From PI, Flue gets these parts:
+
+- one interface for the LLM and the Prompt
+- the AgentLoop
+- the Guardrail hooks
+- the Session and its compaction.
+
+On top of these parts, Flue adds the parts that deploy the agent:
+
+- an HTTP service as the frontend
+- an Environment that changes for each runtime
+- Topology with `task`
+- skill calls that the caller starts, with a result that has a schema
+- roles
+- a `SessionStore` that keeps the Sessions of many tenants
+- changes for one call with the scoped runtime
+- connectors that an AI agent writes.
+
+The document [Flue against the theory](theory.md) compares the parts that Flue
+gets from PI with the parts that Flue adds. It uses the words of the theory.
 
 ## Documents in this case study
 
-- **[components.md](components.md)** — the eight high-level components grouped by responsibility (build pipeline, runtime entry, session harness, sandbox substrate, tool surface, context layer, persistence/compaction, developer toolchain). Read this first for the structural map.
-- **[pseudocode.md](pseudocode.md)** — the conceptual architecture rendered as pseudocode: build pipeline, generated entry, session harness loop, the scoped-runtime mechanism, sandbox abstraction, task subagents, compaction. Read this when you want to see the _shape_ end-to-end.
-- **[theory.md](theory.md)** — Flue cross-referenced against the theory and the [PI](../pi.md) case study: what Flue inherits, what it adds, and which PI gaps it closes vs. accepts.
+- The document [The components of Flue](components.md) gives the eight
+  components of Flue, in groups by function. Read it first for a map of the
+  structure. The components are these:
+  - the build pipeline
+  - the runtime entry
+  - the Session harness
+  - the sandbox layer
+  - the tools
+  - the context layer
+  - the storage and compaction
+  - the developer tools.
+- The document [Flue in pseudocode](pseudocode.md) shows the structure of Flue
+  as pseudocode. Read it to see the full shape from one end to the other end. It
+  shows these parts:
+  - the build pipeline
+  - the entry that the build writes
+  - the loop of the Session harness
+  - the scoped runtime
+  - the sandbox interface
+  - the task subagents
+  - the compaction.
+- The document [Flue against the theory](theory.md) compares Flue with the
+  theory and with the [PI](../pi.md) case study. It tells which parts Flue gets
+  from PI and which parts it adds. It also tells which parts that PI does not
+  have Flue adds, and which of these parts Flue also does not have.
 
-## In one sentence
+<a id="in-one-sentence"></a>
 
-A build system that turns a markdown-defined workspace into a runtime-agnostic, sandboxed, multi-session HTTP service wrapping `pi-agent-core`, with the same tool surface and ergonomics as Claude Code.
+## Flue in short
+
+Flue is a build system. It changes a project folder of Markdown files into an
+HTTP service around `pi-agent-core`. The service runs on different runtimes, in
+a sandbox, with many Sessions. It has the same tools and the same method of
+operation as Claude Code.

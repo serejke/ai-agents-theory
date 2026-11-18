@@ -1,20 +1,36 @@
 # Router
 
-A Router selects which agent configuration handles a given input — choosing the right model, tools, or target agent based on the task at hand. It is the dispatch layer that prevents every request from going through the most expensive, most capable agent when a simpler one would suffice.
+A Router selects the agent configuration for each input: the model, the tools or
+the target agent that agrees with the task. With this pattern, a small task does
+not go to the strongest agent with the highest price when a smaller agent can do
+it.
 
-**Composition**: function (input, context) → configuration.
+**Composition**: a function from (input, context) to a configuration.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-Not every task requires the same resources. A simple question about syntax can be handled by a fast, cheap model. A complex architectural decision needs a capable, expensive model. A coding task needs write tools; a review task needs read-only tools. Without routing, you either waste resources (sending everything to the most capable agent) or sacrifice quality (using one configuration for everything).
+## Value
 
-## Formal Definition
+Different tasks agree with different models and tools:
+
+- A short request about syntax: a fast model with a low price is sufficient.
+- A large decision about the structure of a system: use a strong model with a
+  high price.
+- A task that changes code: the agent must have tools that write.
+- An inspection of code: tools that only read are sufficient.
+
+Without a Router, you send all tasks to the strongest agent, and the price is
+too high. Or you use one configuration for all tasks, and the quality is lower.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
-// The Router receives the user input and any ambient state the host system
-// wants to expose (current phase, user role, time of day, etc.), and returns
-// a Session configuration: the tools, system prompt, and LLM the matched
-// Session should run with.
+// The Router gets the user input and the other state that the host system
+// gives to it (for example the current phase, the user role, the time of day).
+// It returns a Session configuration: the tools, the system prompt and the
+// LLM of the selected Session.
 type Router = (
   input: string,
   context: Record<string, unknown>,
@@ -25,15 +41,22 @@ type Router = (
 };
 ```
 
-Router is an ordinary function — it can be implemented as heuristics, as an LLM call, or as natural language descriptions on agent definitions. The implementation determines the trade-off between cost, flexibility, and determinism.
+A Router is a usual function. You can write it with rules in code, with an LLM
+call, or with text descriptions on the agent definitions. The implementation
+controls the price of the Router, how flexible it is, and if its result is
+deterministic.
 
----
+<a id="variants"></a>
 
 ## Variants
 
-### Heuristic Router
+<a id="heuristic-router"></a>
 
-Rule-based dispatch. Cheap and deterministic but brittle.
+### Router with rules
+
+A Router with rules uses conditions in code to send each input to a
+configuration. It has a low price, and its result is deterministic. But it
+breaks easily when an input does not agree with its rules.
 
 ```typescript
 const heuristicRouter: Router = (input, context) => {
@@ -43,11 +66,14 @@ const heuristicRouter: Router = (input, context) => {
 };
 ```
 
-Claude Code does this implicitly — uses a faster model for sub-agents (Task tool), a more capable model for the main loop.
+Claude Code does this in its code, without a Router step. It uses a faster model
+for the subagents (the `Task` tool) and a stronger model for the primary loop.
 
 ### LLM Router
 
-Uses an LLM to classify the input and select a configuration. More flexible but expensive and non-deterministic.
+An LLM Router uses an LLM to find the type of the input and select a
+configuration. It is more flexible than a Router with rules. But it has a higher
+price, and its result can change for the same input.
 
 ```typescript
 const llmRouter: Router = async (input) => {
@@ -56,9 +82,13 @@ const llmRouter: Router = async (input) => {
 };
 ```
 
-### Prompt-as-Router
+<a id="prompt-as-router"></a>
 
-In Agent-as-Tool systems, routing logic is encoded as natural language descriptions on each subagent definition:
+### Descriptions as a Router
+
+In this variant, the text description of each subagent contains the routing
+rules. It occurs in systems where an agent calls other agents as tools (see
+[Topology](topology.md#agent-as-tool)).
 
 ```typescript
 const agents = {
@@ -71,46 +101,77 @@ const agents = {
     // ...
   },
 };
-// The orchestrator LLM reads descriptions and decides which agent to invoke.
+// The orchestrator LLM reads the descriptions and selects the agent to call.
 ```
 
-The word "AFTER" in the data-analyst description does the work of a state transition guard. Preconditions, postconditions, and capability boundaries are encoded in natural language.
+The word "AFTER" in the description of `data-analyst` does the work of a guard
+in a [StateMachine](state-machine.md). The text descriptions give the conditions
+before each agent, the conditions after it, and the limits of each agent.
 
-**Pros**: Zero routing code. Flexible — LLM adapts to context. Easy to add new agents.
-**Cons**: Non-deterministic — model may skip agents or invoke them out of order. Can't audit routing logic. No guarantees. Not suitable when ordering must be strict.
+The good properties of this variant:
 
-**Applicability**: Prototypes, demos, systems where approximate routing is acceptable. For production pipelines with strict phase ordering, use explicit [StateMachine](state-machine.md) transitions instead.
+- It has no routing code.
+- It is flexible: the LLM changes its decisions for each context.
+- It is easy to add a new agent.
 
----
+The bad properties of this variant:
 
-## Handoff — Routing During Execution
+- Its result is not deterministic. The model can ignore an agent, or call agents
+  in the incorrect sequence.
+- You cannot examine the routing rules.
+- It does not make sure that the routing is correct.
+- It is not applicable when the agents must operate in a specified sequence.
 
-Standard routing happens _before_ execution — the router selects a configuration, then execution begins. **Handoff** is routing that happens _during_ execution: an agent mid-task decides to yield control to a peer agent.
+This variant is applicable to first versions of a system, to systems that you
+show to persons, and to systems where approximate routing is sufficient. If a
+pipeline for customers must keep a specified sequence of phases, use the phase
+changes of a StateMachine.
+
+<a id="handoff--routing-during-execution"></a>
+
+## Handoff: a change of agent during the work
+
+A **handoff** occurs during the work: an agent in the middle of a task gives
+control to a different agent at the same level. Usual routing occurs before the
+work starts: the Router selects a configuration, and then the work starts.
 
 ```typescript
 type Handoff = {
-  from: string; // current agent
-  to: string; // target agent
-  context: unknown; // what to pass along
-  reason: string; // why the handoff is happening
+  from: string; // the current agent
+  to: string; // the target agent
+  context: unknown; // the data to give to the target agent
+  reason: string; // the cause of the handoff
 };
 ```
 
-Handoff is different from delegation (which is parent→child, hierarchical) and different from pre-execution routing (which happens before the agent starts). In a handoff, agent A is already working, encounters something outside its expertise, and transfers control to agent B — along with the relevant context.
+In a handoff, the first agent does the task. It finds a part of the task that is
+not in its field, and it gives control to a second agent with the related
+context. A handoff is different from these operations:
 
-**Seen in**: LangGraph's `Command(goto="other_agent")`, OpenAI Agents SDK's first-class `Handoff` primitive.
+- A call to a subagent: an agent gives a part of its task to a subagent below it
+  and gets the result back.
+- A Router step before the work: the Router selects the agent before the agent
+  starts.
 
-Handoff is a composition of three concerns:
+Examples: LangGraph has `Command(goto="other_agent")`. The OpenAI Agents SDK has
+a `Handoff` type as a basic part of the SDK.
 
-1. **Signal** — the executing agent decides it needs to yield (from execution to orchestration)
-2. **Router** — the orchestration layer selects which agent takes over
-3. **Channel** — the context from the current agent transfers to the next
+A handoff is a composition of these parts:
 
----
+1. **Signal**: the agent that does the work selects to give back control.
+   Control moves from the work to the control layer.
+2. **Router**: the control layer selects the agent that continues the task.
+3. **[Channel](channel.md)**: the context of the first agent moves to the next
+   agent.
 
 ## Related
 
-- [AgentLoop](../harness/agent-loop.md) — what the Router configures and dispatches to
-- [Planner](planner.md) — Router may select different models for planning vs. implementation
-- [StateMachine](state-machine.md) — code-level routing with guards; more reliable than prompt-based routing
-- [Topology](topology.md) — multi-agent coordination shapes that use routing for control flow between agents
+- [AgentLoop](../harness/agent-loop.md): the Router configures it and sends the
+  input to it.
+- [Planner](planner.md): a Router can select one model for the plan and a
+  different model for the implementation.
+- [StateMachine](state-machine.md): it selects the next phase in code, with
+  conditions. Its sequence is deterministic, and the sequence of text
+  descriptions in prompts is not.
+- [Topology](topology.md): the shapes of the connections between agents. A
+  Topology uses Routers to control the flow between agents.

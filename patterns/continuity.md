@@ -1,109 +1,181 @@
 # Continuity
 
-Continuity is the protocol that enables coherent agent progress across multiple context windows. It is what separates "start from zero every session" from "pick up where the last session left off" — the difference between an agent that can handle a 30-minute task and one that can handle a 30-day project.
+Continuity lets an agent continue a long task across two or more Sessions. Each
+new Session starts at the point where the last Session stopped, and does not
+start from zero. With Continuity, an agent can do a project of 30 days, not only
+a task of 30 minutes. **Continuity** is a pattern: an agent system can use it,
+but it is not necessary.
 
-**Composition**: [Memory](memory.md) (ground truth + progress log) + [PromptLoading](prompt-loading.md) (startup sequence) + [Guardrail](../harness/guardrail.md) (clean state enforcement) + [Tool](../primitives/tool.md) (environment bootstrap).
+**Composition**: [Memory](memory.md) (ground truth + progress log) +
+[PromptLoading](prompt-loading.md) (start sequence) +
+[Guardrail](../harness/guardrail.md) (clean state) +
+[Tool](../primitives/tool.md) (bootstrap).
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-A [Session](../harness/session.md) is bounded by the [LLM](../primitives/llm.md)'s context window. When a task exceeds that window — and most real projects do — the agent needs multiple sessions. Without explicit continuity mechanisms, each new session faces two failure modes:
+## Value
 
-1. **Premature completion.** The agent looks around, sees code that exists, and concludes the job is done. Partially implemented features look like fully implemented features from inside a fresh context window. Without a ground truth document that defines "done," the agent has no way to know the difference.
+A [Session](../harness/session.md) can hold only the text that the context
+window of the [LLM](../primitives/llm.md) can hold. Most projects are too large
+for one context window. Thus the agent must use two or more Sessions. Without
+Continuity, each new Session has these problems:
 
-2. **Archaeological waste.** The agent spends its context budget figuring out what was done, what state things are in, and how to start the environment. This orientation work is identical across every session and produces no forward progress. Without a progress log and environment bootstrap, each session pays this tax from scratch.
+- **The agent stops before the task is done.** The agent sees the code and
+  thinks that the task is done. In a new context window, a feature that is not
+  fully done looks the same as a feature that is done. The agent can see the
+  difference only if a document tells when the task is done.
+- **The agent uses its context to find the condition of the project again.** It
+  finds which work is done, which changes are open and how to start the
+  Environment. This work is the same in each Session, and it does not move the
+  task forward. Without a progress log and a bootstrap, each Session does this
+  work again.
 
-Both failures share a root cause: the agent has no persistent, structured understanding of the project's state that survives the context window boundary.
+These problems have one cause. The agent has no data about the condition of the
+project that stays after the end of the context window.
 
-## Formal Definition
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type Continuity = {
-  groundTruth: GroundTruth; // what "done" means — survives all sessions
-  progressLog: ProgressLog; // what was done, what's next — updated each session
-  bootstrap: Tool; // reproducible environment setup
-  startupSequence: PromptLoading; // orientation protocol at session start
-  cleanState: Guardrail; // enforced handoff discipline at session end
+  groundTruth: GroundTruth; // what "done" means; stays across all Sessions
+  progressLog: ProgressLog; // what is done and what is next; updated each Session
+  bootstrap: Tool; // prepares the Environment, the same way each time
+  startupSequence: PromptLoading; // the steps at the start of each Session
+  cleanState: Guardrail; // the checks at the end of each Session
 };
 ```
 
----
+<a id="components-and-failure-modes"></a>
 
-## Components and Failure Modes
+## Parts
 
-Each component addresses a specific failure mode. Remove any one and the corresponding failure returns.
+Each part of Continuity stops one problem. If you remove a part, its problem
+occurs again.
 
-### Ground Truth — Prevents Premature Completion
+| Part           | Problem that it stops                                     |
+| -------------- | --------------------------------------------------------- |
+| Ground truth   | The agent stops before the task is done                   |
+| Progress log   | The agent finds the condition of the project again        |
+| Bootstrap      | The agent finds how to start the Environment again        |
+| Start sequence | The agent starts new work before it knows the condition   |
+| Clean state    | The agent gives open problems to the next Session to find |
 
-A structured, enumerated list of verifiable completion criteria. Each item describes a user-visible behavior that can be tested end-to-end, with an explicit status the agent updates only after verification.
+<a id="ground-truth--prevents-premature-completion"></a>
+
+### Ground truth
+
+The ground truth is a list of the conditions that make the project done. Each
+item tells one function that a user can see, and a test can examine it from the
+start to the end. Each item also has a `status` field. The agent changes this
+field only after this test.
 
 ```typescript
 type GroundTruth = {
   items: Array<{
     description: string; // "user can open a new chat, type a query, see a response"
-    steps: string[]; // verification steps
-    status: "done" | "todo"; // updated only after end-to-end verification
+    steps: string[]; // the steps of the end-to-end test
+    status: "done" | "todo"; // changed only after the end-to-end test
   }>;
-  format: "json"; // rigid structure resists casual modification
+  format: "json"; // a rigid structure that the agent does not change casually
 };
 ```
 
-The ground truth is stored as JSON rather than Markdown. JSON's rigid structure resists casual editing — the agent treats it as data to update carefully, not prose to rewrite. This is a deliberate cognitive affordance: the format reinforces the intended interaction pattern.
+The ground truth is a JSON file, not a Markdown file. The rigid structure of
+JSON makes the agent careful. The agent sees the file as data that it changes
+carefully, not as text that it can write again. Thus the format of the file
+helps the agent to use it correctly.
 
-Without ground truth, the agent infers completeness from the code. This inference is unreliable — code can exist that isn't functional, functionality can exist that's incomplete. Ground truth makes completeness explicit and unambiguous.
+Without a ground truth, the agent uses the code to find if the task is done.
+This method can give an incorrect result. Code can be in the project but not
+operate. A function can operate but not be fully done. The ground truth tells
+clearly which work is done.
 
-### Progress Log — Prevents Archaeological Waste
+<a id="progress-log--prevents-archaeological-waste"></a>
 
-An append-only log that agents update at the end of every session, documenting what they worked on, what they completed, and what state they left things in.
+### Progress log
+
+The progress log is a file where the agent adds an entry at the end of each
+Session. The agent does not change the previous entries. Each entry tells the
+work that the agent did and the work that it completed. It also tells the
+condition of the project at the end of the Session.
 
 ```typescript
 type ProgressLog = {
   entries: Array<{
-    session: string; // session identifier
-    worked_on: string; // what was attempted
-    completed: string[]; // what was finished
-    state: string; // what state things are in
-    next: string; // recommended next step
+    session: string; // the identifier of the Session
+    worked_on: string; // the work that the agent tried
+    completed: string[]; // the work that the agent completed
+    state: string; // the condition of the project
+    next: string; // the recommended next step
   }>;
 };
 ```
 
-Combined with git history, the progress log gives every future session a fast orientation mechanism. A new session reads the latest entry and immediately knows: what was done last, what's next, what state the environment is in. No archaeology required.
+The progress log and the git history let each new Session find its position
+quickly. A new Session reads the last entry. Then it knows the last work, the
+next step and the condition of the Environment. It is not necessary to examine
+the project to find these facts.
 
-### Bootstrap — Prevents Setup Tax
+<a id="bootstrap--prevents-setup-tax"></a>
 
-A reproducible environment setup mechanism (script, tool, or procedure) that brings the development environment to a working state in one step.
+### Bootstrap
+
+The bootstrap is a script, a tool or a procedure that prepares the Environment
+for work in one step. It starts the servers, prepares the databases and installs
+the dependencies.
 
 ```typescript
 type Bootstrap = Tool & {
   name: "bootstrap";
-  // Starts servers, sets up databases, installs dependencies.
-  // Identical across all sessions — no agent decision-making required.
+  // Starts servers, prepares databases, installs dependencies.
+  // The same in each Session: the agent makes no decisions.
   execute: () => Promise<{ output: "environment ready" }>;
 };
 ```
 
-Every session that follows the first can begin by running the bootstrap rather than spending tokens figuring out how to start servers, set up databases, and get the application into a testable state. The tokens saved on environment setup in every session accumulate significantly over a long project.
+After the first Session, each Session can start with the bootstrap. The agent
+does not use tokens to find how to start the servers, prepare the databases and
+prepare the program for a test. Each Session keeps these tokens. In a long
+project, the total quantity of tokens that the agent keeps becomes large.
 
-### Startup Sequence — Prevents Disoriented Work
+<a id="startup-sequence--prevents-disoriented-work"></a>
 
-A fixed sequence of context-gathering steps that every session executes before beginning new work:
+### Start sequence
+
+The start sequence is a list of steps that each Session does before it starts
+new work. The steps are the same each time. They collect the context that the
+agent uses to find its position.
 
 ```typescript
 const startupSequence: PromptLoading = () => {
-  // 1. Read progress log — what was done last
-  // 2. Read ground truth — what's done vs. remaining
-  // 3. Check git log — recent changes
-  // 4. Run bootstrap — start environment
-  // 5. Run basic verification — confirm environment works
-  // Only then: choose next task and begin work
+  // 1. Read the progress log: the last work
+  // 2. Read the ground truth: done work and open work
+  // 3. Read the git log: recent changes
+  // 4. Run the bootstrap: start the environment
+  // 5. Run a basic test: make sure that the environment operates
+  // Only then: select the next task and start work
 };
 ```
 
-The startup sequence is a [PromptLoading](prompt-loading.md) that assembles orientation context from the other continuity components. If the verification step reveals the environment is broken, the agent fixes existing breakage before touching anything new — preventing the compounding problem where new work is built on a broken foundation.
+The start sequence is a [PromptLoading](prompt-loading.md). It puts the data of
+the other parts of Continuity into the context. If the basic test shows that the
+Environment is broken, the agent repairs it before it starts new work. Thus the
+agent does not add new work on top of broken work, where the problems become
+larger.
 
-### Clean State — Prevents Messy Handoffs
+<a id="clean-state--prevents-messy-handoffs"></a>
 
-A [Guardrail](../harness/guardrail.md) that enforces handoff discipline at the end of every session. The agent cannot consider its work done until:
+### Clean state
+
+The clean state is a [Guardrail](../harness/guardrail.md) that does checks at
+the end of each Session. The agent cannot stop its work until all the checks
+pass:
+
+- Git has no changes without a commit.
+- The progress log has a new entry.
+- The build passes.
 
 ```typescript
 const cleanState: Guardrail = {
@@ -118,44 +190,70 @@ const cleanState: Guardrail = {
 };
 ```
 
-This is a Guardrail, not a suggestion in the system prompt. Anything the LLM can ignore, the LLM will eventually ignore. Structural enforcement prevents the failure mode where agents leave half-implemented features, broken tests, and undocumented changes for the next session to untangle.
+This rule is a Guardrail, not a request in the system prompt. If the LLM can
+ignore a rule, the LLM will ignore it at some time. A Guardrail is part of the
+structure, and the agent cannot ignore it. Thus the agent does not give these
+problems to the next Session: features that are not fully done, broken tests and
+changes without documentation.
 
-Git commits serve double duty here: they're both a documentation mechanism (descriptive commit messages) and a recovery mechanism (revert to last known-good state on failure).
+Git commits have two functions here:
 
----
+- A commit message with a good description is documentation.
+- A commit is a point that the agent can go back to. If a change fails, the
+  agent can go back to the last commit that operated correctly.
 
-## Continuity vs. Memory
+<a id="continuity-vs-memory"></a>
 
-Continuity composes [Memory](memory.md) with other primitives to solve a specific problem. The relationship:
+## Continuity and Memory
 
-| Concern       | Memory                        | Continuity                                |
-| ------------- | ----------------------------- | ----------------------------------------- |
-| Scope         | Cross-session knowledge       | Cross-session task progress               |
-| Content       | Decisions, preferences, facts | Ground truth, progress, environment state |
-| Write trigger | Extraction from interaction   | Session boundary (start and end)          |
-| Read trigger  | Relevance to current task     | Every session start (fixed protocol)      |
-| Without it    | Agent forgets preferences     | Agent loses track of multi-session work   |
+Continuity composes [Memory](memory.md) with other concepts for one task: work
+on a project across Sessions. Memory gives the facts that the agent knows from
+previous work. Continuity gives the position of the agent in a task of two or
+more Sessions.
 
-Memory answers "what does the agent know from past experience?" Continuity answers "where is the agent in a multi-session task?" Both are cross-session persistence, but they solve different problems and compose independently — an agent can have Memory without Continuity (remembers preferences but can't track multi-session progress) or Continuity without Memory (tracks progress but forgets that you prefer TypeScript strict mode).
+| Item                 | Memory                                      | Continuity                                  |
+| -------------------- | ------------------------------------------- | ------------------------------------------- |
+| Function             | Knowledge across Sessions                   | The position in a task across Sessions      |
+| Data                 | Decisions, facts and selections of the user | Ground truth, progress log and Environment  |
+| When the agent reads | When the data is related to the task        | At the start of each Session, in a sequence |
+| When the agent adds  | When it gets facts from the work            | At the start and the end of each Session    |
+| Without it           | The agent does not keep the user selections | The agent does not know its position        |
 
----
+The two patterns keep data across Sessions, but they do different work. They
+compose independently:
 
-## When Continuity Matters
+- An agent can have Memory without Continuity. It keeps the selections of the
+  user, but it cannot follow a task across Sessions.
+- An agent can have Continuity without Memory. It follows the task, but it does
+  not keep the fact that you want the TypeScript option `strict`.
 
-Continuity is unnecessary for tasks that fit within a single context window. For a quick bug fix, a code review, or a short conversation, [Session](../harness/session.md) history is sufficient.
+<a id="when-continuity-matters"></a>
 
-Continuity becomes essential when:
+## When to use Continuity
 
-- **The task exceeds one context window.** Building a feature, implementing a specification, any project that takes more than one session.
-- **Multiple agents work on the same project.** Each agent needs orientation — not just what it did last time, but what all agents have done. Ground truth and progress logs serve as the coordination surface.
-- **The project spans days or weeks.** Session history is volatile. Without Continuity, a Monday session has no connection to Friday's session.
+If one context window can hold a task, Continuity is not necessary. For a small
+bug repair, a check of a code change or a short conversation, the
+[Session](../harness/session.md) history is sufficient.
 
----
+Continuity is necessary in these conditions:
+
+- **The task is too large for one context window.** Examples are a new feature,
+  the work of a specification, and each project that uses more than one Session.
+- **Two or more agents work on the same project.** Each agent must know the work
+  of all agents, not only its last work. All the agents use the ground truth and
+  the progress log to find the work of the other agents.
+- **The project continues for many days.** The Session history does not stay.
+  Without Continuity, a Session has no connection to a Session that occurred
+  some days before it.
 
 ## Related
 
-- [Session](../harness/session.md) — within-session history; Continuity bridges across sessions
-- [Memory](memory.md) — cross-session knowledge; Continuity is the task-progress specialization
-- [PromptLoading](prompt-loading.md) — the startup sequence is a PromptLoading composition
-- [Guardrail](../harness/guardrail.md) — clean state enforcement is a Guardrail
-- [Workspace](workspace.md) — ground truth and progress logs live in the workspace as files
+- [Session](../harness/session.md): the history in one Session. Continuity
+  connects the Sessions.
+- [Memory](memory.md): knowledge across Sessions. Continuity is the special type
+  of Memory for the position in a task.
+- The [PromptLoading](prompt-loading.md) pattern: the start sequence is a
+  PromptLoading.
+- [Guardrail](../harness/guardrail.md): the clean state is a Guardrail.
+- [Workspace](workspace.md): the ground truth and the progress log are files in
+  the Workspace.

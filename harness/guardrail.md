@@ -1,43 +1,84 @@
 # Guardrail
 
-A Guardrail is the tool-dispatch interception layer of the [AgentLoop](agent-loop.md): the hook machinery through which every tool call passes before and after execution, plus the policies registered at those hooks. It is the harness boundary that stands between what the LLM intends and what actually happens in the [Environment](../environment/environment.md).
+A Guardrail is the check point that each tool call of an agent goes through,
+before its tool runs and after it. At this point, rules from the developer can
+let the call continue, stop it, change its result or get approval from a person.
+It is the boundary between the step that the LLM wants and the step that occurs
+in the [Environment](../environment/environment.md).
 
-**Composition**: `pre` and `post` hook points at the tool-dispatch step of AgentLoop + policies registered at those hooks. The hook machinery is structural — every AgentLoop that executes tools has it. The policies are user-authored content — they may be empty (no-op), or they may deny, redact, or require confirmation.
+**Composition**: a `pre` hook and a `post` hook at the dispatch of the
+[AgentLoop](agent-loop.md) + the policies at these hooks.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-Every tool call in an Agent goes through a dispatch step: the LLM decides → dispatch → Tool executes → result returns. That dispatch step is where Guardrail sits. It is structurally present in every AgentLoop that runs tools; what varies is whether policies are registered at its hooks.
+## Value
 
-This matters because everything else in an Agent — the system prompt, tools, memory — the LLM can ignore or interpret its own way. Tell it "don't push to main" in the system prompt and it will usually comply, but there's no guarantee. A Guardrail makes compliance structural: the `push --force` command is intercepted and blocked before it reaches the shell, regardless of what the LLM intended.
+A Guardrail makes a rule that the LLM cannot break. The LLM can ignore the other
+parts of an Agent, for example the system prompt, the tools and the memory. It
+can also give them a different meaning. If the system prompt tells "don't push
+to main", the LLM usually obeys, but this result is not sure. A Guardrail stops
+the `push --force` command before the command gets to the shell. The LLM cannot
+change this result.
 
-Guardrail is harness, not a compositional choice. An Agent without registered policies still has the Guardrail machinery — the hooks fire, they just return allow by default. PI's `beforeToolCall`/`afterToolCall` are first-class API in `pi-agent-core` (the AgentLoop harness), called on every tool invocation even when no handlers are attached. Saying "my Agent has no Guardrails" means "no policies registered" — not "no interception point." The distinction between suggestions the model might follow and constraints the model cannot violate is what separates a prototype from a production Agent.
+This difference is the difference between a first test version of an Agent and
+an Agent in production. A request that the model can ignore is sufficient for a
+test. An Agent in production must have rules that the model cannot break.
 
-## Formal Definition
+### Each Agent has the hooks
+
+Each tool call of an Agent goes through the dispatch:
+
+1. The LLM selects a tool call.
+2. The harness sends the call to the tool.
+3. The tool runs.
+4. The result goes back to the LLM.
+
+The Guardrail is at the dispatch. Each AgentLoop that runs tools has the
+dispatch. Thus the Guardrail is a part of the harness, not an optional pattern.
+
+The hooks are a part of the structure. The user writes the policies. A policy
+can let each call continue with no change. It can also stop a call, remove data
+from a result or get approval from a person.
+
+An Agent without policies also has the hooks. The hooks run for each tool call
+and let the call continue. For example, PI has `beforeToolCall` and
+`afterToolCall` in the API of `pi-agent-core`, its AgentLoop harness. PI calls
+them for each tool call, also if no handler is attached. Thus the words "my
+Agent has no Guardrails" tell that the Agent has no policies. They do not tell
+that the Agent has no check point.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type PreVerdict =
   | { allow: true }
   | { deny: string } // reason shown to the user or logged
-  | { askUser: string }; // prompt string presented to the user for confirmation
+  | { askUser: string }; // question that the user must confirm
 
 type PostVerdict =
   | { allow: true }
-  | { redact: ToolResult } // replaced, sanitized result
+  | { redact: ToolResult } // the result, replaced or cleaned
   | { block: string }; // reason; the result is discarded
 
 type Guardrail = {
-  // Pre: check BEFORE executing an action
+  // Pre: check BEFORE the tool runs
   pre?: (action: ToolCall) => PreVerdict;
 
-  // Post: check AFTER execution
+  // Post: check AFTER the tool runs
   post?: (action: ToolCall, result: ToolResult) => PostVerdict;
 };
 ```
 
-Guardrails are middleware — they wrap [Tool](../primitives/tool.md) execution with pre- and post-checks. They are not tools themselves (the LLM doesn't call them) and not part of the LLM's context (the LLM doesn't reason about them). They are infrastructure that intercepts actions at the boundary between the LLM's decisions and the world's execution.
+A Guardrail is a layer around a [Tool](../primitives/tool.md): a check before
+the tool runs and a check after it. It is not a tool, because the LLM does not
+call it. It is not a part of the context of the LLM, because the LLM does not
+know about it. It is a part of the harness. It examines each step at the
+boundary between the decisions of the LLM and the operations in the Environment.
 
 ```typescript
-// Application — wraps a Tool with Guardrails
+// Application: put Guardrails around a Tool
 const guardedTool = (tool: Tool, guardrails: Guardrail[]): Tool => ({
   ...tool,
   execute: async (params) => {
@@ -56,8 +97,6 @@ const guardedTool = (tool: Tool, guardrails: Guardrail[]): Tool => ({
   },
 });
 ```
-
----
 
 ## Examples
 
@@ -82,51 +121,97 @@ const noSecrets: Guardrail = {
 };
 ```
 
-In Claude Code, Guardrails manifest as: the permission system ("can it write files without asking?"), safety rules (restricted commands), and hook-based policies (pre/post tool-call hooks). In most current systems Guardrails are hardcoded, whereas ideally this should be a composable layer — so the user can add their own constraints without modifying the agent's core.
+In Claude Code, these parts are Guardrails:
 
----
+- the permission system, for example a rule that lets the agent write files
+  without approval
+- safety rules, for example commands that the agent cannot run
+- policies in hooks before and after each tool call.
 
-## Guardrails and Tool Expressiveness
+In most systems, the developers write the Guardrails into the code of the agent.
+A better configuration is a layer of policies that can compose. Then a user can
+add rules without a change to the core of the agent.
 
-How complete a Guardrail's coverage is depends on where the tool sits on the [expressiveness spectrum](../primitives/tool.md).
+<a id="guardrails-and-tool-expressiveness"></a>
 
-Over **specific tools** (closed action space), Guardrails provide complete coverage. The set of dangerous actions is enumerable. A Guardrail on `file_write` can inspect the path and deterministically allow or deny — no combination of parameters can circumvent it.
+## Guardrails on different types of tools
 
-Over **generative tools** (open action space — bash, code execution), Guardrails provide pattern-level coverage. They catch known dangerous commands (`rm -rf`, `push --force`) and raise the bar against accidental damage. For complete defense over generative tools, Guardrails compose with environment-level containment:
+The range of operations of a tool controls the protection that a Guardrail can
+give. [Tool](../primitives/tool.md#the-tool-expressiveness-spectrum) gives this
+range, from specific tools to generative tools.
 
-1. **Specific tools for common operations** — Guardrail interception provides complete coverage
-2. **Pattern-based Guardrails on bash** — catch known dangerous commands at the tool boundary
-3. **Sandboxed environments** — contain blast radius at the environment boundary (network isolation, filesystem restrictions, no credentials)
-4. **Human-in-the-loop** — require approval for commands matching risk patterns
+On a **specific tool**, a Guardrail stops all dangerous calls. The tool has a
+closed set of operations, thus you can make a list of all its dangerous calls.
+For example, a Guardrail on `file_write` can examine the path. Then it lets the
+file operation continue or stops it, with the same result each time. No set of
+parameters can go around this check.
 
-Guardrails enforce constraints at the tool boundary; sandboxes enforce constraints at the environment boundary. For specific tools, the tool boundary is sufficient. For generative tools, both layers work together. See the [Tool Expressiveness Spectrum](../primitives/tool.md) for the full analysis.
+On a **generative tool**, for example bash or code that the agent runs, a
+Guardrail stops only the patterns that it knows. It catches known dangerous
+commands, for example `rm -rf` and `push --force`. Thus the risk of accidental
+damage is lower. For a full defense, Guardrails compose with limits in the
+Environment:
 
----
+1. **Specific tools for frequent operations**: the Guardrail stops all dangerous
+   calls of these tools.
+2. **Guardrails with patterns on bash**: they catch known dangerous commands at
+   the tool boundary.
+3. **Sandbox Environments**: they keep the damage small at the Environment
+   boundary. They isolate the network, put limits on the filesystem and give no
+   credentials.
+4. **Approval from a person**: the agent must get approval for each command that
+   agrees with a risk pattern.
 
-## Modes: Observe and Control
+Guardrails apply limits at the tool boundary. Sandboxes apply limits at the
+Environment boundary. For specific tools, the tool boundary is sufficient. For
+generative tools, the two layers operate together.
+[Tool](../primitives/tool.md#the-tool-expressiveness-spectrum) gives all the
+facts about the tool types.
 
-The same middleware infrastructure serves different purposes depending on what the callback returns:
+<a id="modes-observe-and-control"></a>
 
-- **Observe mode**: Log every tool call for debugging, audit, or cost tracking. Always returns `allow`. The system captures what happened without intervening. Example: hooks that log to transcript + JSONL but never deny.
-- **Control mode**: Enforce constraints. Deny dangerous actions, redact sensitive output, require human confirmation for high-stakes operations. Example: blocking `rm -rf` commands, masking API keys in output.
+## Monitor mode and control mode
 
-The infrastructure is identical — pre/post callbacks wrapping tool execution. Build hooks once, use for both observability and enforcement. The difference is purely in what the callback returns.
+The same hooks can monitor the tool calls or control them. The value that the
+policy gives back selects the mode:
 
----
+- **Monitor mode**: the policy records each tool call. Then a developer can
+  debug the agent, do an inspection of its work or calculate the cost. It always
+  gives back `allow`. The system records the step but does not change it. For
+  example, some hooks write each call to the log and to a `.jsonl` file, and do
+  not stop a call.
+- **Control mode**: the policy applies rules. It stops dangerous steps, removes
+  sensitive data from the output and gets approval from a person for steps with
+  a high risk. For example, a policy stops each `rm -rf` command or removes API
+  keys from the output.
 
-## Guardrails vs. Verification
+The hooks are the same in the two modes: functions before and after the tool
+runs. Make the hooks one time, and use them to monitor and to control. Only the
+value that the policy gives back is different.
 
-Guardrails and [Verification](../verification/index.md) are complementary — both operate on the same action space (tool calls, outputs, trajectories) but at different points in the lifecycle:
+<a id="guardrails-vs-verification"></a>
 
-- **Guardrails**: runtime prevention. Block dangerous actions _during_ execution. The system never reaches the bad state.
-- **Verification**: offline detection. Confirm correct behavior _after_ execution. The system already ran; you're checking whether it did the right thing.
+## Guardrails and verification
 
-A complete agent system has both: Guardrails that prevent catastrophic actions during execution, and Verification that confirms correct behavior across runs. A Guardrail that blocks `rm -rf` at runtime and a trajectory assertion that checks for `rm -rf` in traces serve the same safety goal from different angles.
+Guardrails and [Verification](../verification/index.md) operate together. They
+examine the same data: tool calls, outputs and traces. They operate at different
+times:
 
----
+- **Guardrails** stop a dangerous step while the agent runs. The system does not
+  go into the bad condition.
+- **Verification** examines the runs after their end. It finds if the system did
+  the correct work.
+
+A full agent system has the two. Guardrails stop very dangerous steps while the
+agent runs. Verification shows correct operation across many runs. For example,
+a Guardrail can stop `rm -rf` while the agent runs. A check can find `rm -rf` in
+the traces after the run. The two have the same safety function from different
+sides.
 
 ## Related
 
-- [Tool](../primitives/tool.md) — Guardrails wrap tool execution
-- [StateMachine](../patterns/state-machine.md) — Guardrails constrain actions within a phase; StateMachine constrains transitions between phases
-- [Verification](../verification/index.md) — offline counterpart to runtime Guardrails
+- [Tool](../primitives/tool.md): Guardrails are around the tools when they run
+- [StateMachine](../patterns/state-machine.md): Guardrails put limits on the
+  steps in a phase, and a StateMachine puts limits on the changes between phases
+- [Verification](../verification/index.md): the check after the run, which
+  operates together with the Guardrails during the run

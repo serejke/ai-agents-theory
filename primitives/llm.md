@@ -1,68 +1,158 @@
 # LLM
 
-The LLM is a stateless function that maps a [Prompt](prompt.md) to a stream of text. At the bottom, it's `string → string` — tokens in, tokens out. Every other appearance of the LLM (structured messages, tool calls, role tags) is a protocol layer that lives in the Prompt on the way in and is parsed out of the output stream on the way back.
+An LLM (a large language model, for example Claude or GPT-5) is the part of an
+agent system that reads text and writes text. It keeps no data from one call to
+the next call. In the theory, the LLM is a function that changes a
+[Prompt](prompt.md) into a stream of text. Its input is tokens, and its output
+is tokens.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-The LLM is the only concept in agent systems that performs reasoning. The harness ([AgentLoop](../harness/agent-loop.md), [Session](../harness/session.md), [Guardrail](../harness/guardrail.md), [Agent](../harness/agent.md)) and every pattern ([Memory](../patterns/memory.md), [Channel](../patterns/channel.md), [StateMachine](../patterns/state-machine.md), and the rest) exist to structure LLM calls, constrain them, or connect them to other LLM calls and to the world. Without the LLM, the system has no intelligence. Without understanding that the LLM is _stateless_ and _protocol-agnostic at its core_, you will misdesign everything that depends on it.
+## Value
 
-Treating the LLM as `Prompt → text stream` rather than as `(system, messages, tools) → (text + tool_calls)` matters because the latter hides the layer where most design happens. The LLM doesn't natively know about "tools" or "roles" — it recognizes text patterns it was trained to recognize. Everything structured lives in the [Prompt](prompt.md) (input) or gets parsed from the output stream by downstream code. Keeping the LLM primitive narrow — just a function — makes the protocol layer visible and design-able.
+The LLM is the only concept of an agent system that does reasoning. Each other
+concept gives structure to the LLM calls, puts limits on them, or connects them.
+It connects them to other LLM calls and to the data and systems around the
+agent. These other concepts are:
 
-## Formal Definition
+- the harness: the [AgentLoop](../harness/agent-loop.md), the
+  [Session](../harness/session.md), the [Guardrail](../harness/guardrail.md) and
+  the [Agent](../harness/agent.md)
+- each pattern, for example [Memory](../patterns/memory.md),
+  [Channel](../patterns/channel.md) and
+  [StateMachine](../patterns/state-machine.md).
+
+Without the LLM, the system cannot think. These facts about the LLM control each
+part that uses it:
+
+- The LLM keeps no data between calls.
+- At its core, the LLM does not know a protocol. It knows only text.
+
+If you do not know these facts, the structure of the parts around the LLM will
+be incorrect.
+
+### The LLM is only a function
+
+The theory shows the LLM as `Prompt → text stream`. It does not show it as
+`(system, messages, tools) → (text + tool_calls)`. The second view does not show
+the layer where developers make most of their decisions.
+
+The LLM does not know about tools or about the role of a message. It knows the
+text patterns of its training. Messages, roles and tool calls are a protocol
+layer:
+
+- In the input, the [Prompt](prompt.md) holds the protocol.
+- In the output, other code parses the protocol from the stream.
+
+Thus the LLM concept is small: only a function. Then a developer can see the
+protocol layer clearly and make decisions about it.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
-// At the bottom: LLM is text → text.
+// At the bottom: the LLM is text → text.
 type LLM = (input: string) => AsyncStream<string>;
 
-// At the usable level: LLM consumes a Prompt and produces a text stream
-// that downstream code can parse for structured elements.
+// At the level that code uses: the LLM reads a Prompt and gives a text
+// stream. Other code parses the stream to find structured items.
 type LLM = (prompt: Prompt) => AsyncStream<string>;
 
-// The protocol layer — baked into the Prompt and applied in reverse when
-// parsing the output stream — is what turns plain text into structured
-// tool calls, message boundaries, and stop tokens. See Prompt.
+// The protocol layer is in the Prompt. Code applies it in reverse when it
+// parses the output stream. This layer makes plain text into tool calls,
+// message boundaries and stop tokens. See Prompt.
 ```
 
-The LLM has no memory between calls. It has no state. Everything it "remembers" is what was passed in its input. This is fundamental: any agent "memory" is an external construct, not a property of the model. When an Agent "remembers" a decision from yesterday, that knowledge was retrieved from a [Memory](../patterns/memory.md) system, injected into the [Prompt](prompt.md) by a [PromptLoading](../patterns/prompt-loading.md) strategy, and only then read by the LLM.
+The LLM gives a stream, not one value. It writes its output in small parts, one
+after the other. The stream helps in two procedures:
 
-The return type is a stream, not a single value. The LLM produces output incrementally. The streaming property matters for user experience (progressive display) and for [Guardrails](../harness/guardrail.md) (which can inspect output as it's generated).
+- The user sees the output while the LLM writes it.
+- A [Guardrail](../harness/guardrail.md) can examine the output while the LLM
+  writes it.
 
----
+<a id="statelessness-as-an-architectural-constraint"></a>
 
-## Statelessness as an Architectural Constraint
+## The LLM keeps no data between calls
 
-Statelessness means:
+The LLM has no memory between calls and no condition that stays. It knows only
+the data of its input. Thus each agent memory is an external part, not a
+property of the model.
 
-- **No learning between calls.** Two identical calls with identical inputs produce (probabilistically) equivalent outputs. The LLM cannot "learn" from one call to the next.
-- **All context must be explicit.** If the Agent needs to know about a previous conversation, that conversation must be in the Prompt. If it needs to know project conventions, those must be in the Prompt.
-- **Context has a hard ceiling.** The Prompt is bounded by the model's context window (~200K tokens for current models). When content overflows, information is lost — the Agent effectively forgets.
+For example, an Agent "remembers" a decision from a previous Session in these
+steps:
 
-Every persistent capability of an agent system — remembering decisions, accumulating project knowledge, maintaining conversation history — is built _on top of_ this stateless function by other primitives and patterns. The LLM itself provides none of it.
+1. A [Memory](../patterns/memory.md) system finds the decision.
+2. The harness puts the decision into the [Prompt](prompt.md) with
+   [PromptLoading](../patterns/prompt-loading.md).
+3. The LLM reads the decision in the Prompt.
 
-This constraint is what makes the entire theory necessary. If the LLM had built-in persistent memory, cross-session state, and durable execution, most of the other concepts would be redundant. The theory exists because the LLM is stateless and the world needs stateful systems.
+### The results for an agent system
 
----
+- **Each call starts again from zero.** Two calls with the same input give
+  equivalent outputs, with some random differences. The LLM keeps no data from
+  one call for the next call.
+- **The Prompt must hold all the context.** If the Agent must know about a
+  previous conversation, that conversation must be in the Prompt. The same rule
+  applies to the rules of the project.
+- **The context has a hard limit.** The context window of the model sets the
+  maximum quantity of tokens in the Prompt, for example approximately 200
+  thousand tokens. If the text is larger, the Agent cannot see some of the
+  information.
 
-## The Protocol Layer
+### The cause of the theory
 
-Different providers and different models speak different protocols: Anthropic's tool-use format, OpenAI's function calling, raw text with special tokens, XML-prompted models, reasoning blocks, etc. The LLM is trained to recognize a specific protocol; agent code must speak that same protocol when serializing the Prompt, and must use the same protocol when parsing the output stream.
+The LLM does not keep data across calls. Other primitives and patterns on top of
+the LLM do this work. Examples are the decisions of the agent, the knowledge
+about the project, and the history of the conversation.
 
-Think of provider SDKs as convenient wrappers: they present structured inputs (`messages`, `tools`) and structured outputs (`ToolCall` events) as first-class, because that's what developers want to manipulate. Under the hood, the SDK serializes structured input into the protocol's text format, the model runs as `text → text`, and the SDK parses the output stream back into structured events.
+The LLM does not give a memory or a condition across Sessions. It also does not
+continue its work after a crash. Most of the other concepts are necessary only
+because of these limits. The LLM keeps no data, and users must have systems that
+keep data. The theory shows how to make these systems.
 
-The theory separates these layers:
+<a id="the-protocol-layer"></a>
 
-- The **LLM** is the `text → text` core — the trained model.
-- The **[Prompt](prompt.md)** is the structured input and its serialization to text.
-- The **output parsing** (text → structured events) happens at the [AgentLoop](../harness/agent-loop.md) boundary.
+## The protocol layer
 
-This separation lets an Agent swap providers or protocols without changing the LLM's role in the theory: it's always "the reasoning function."
+The LLM knows one protocol from its training. The code of the agent must use the
+same protocol to serialize the Prompt and to parse the output stream. Different
+providers and models use different protocols, for example:
 
----
+- the tool format of Anthropic
+- the function calls of OpenAI
+- text with special tokens
+- models that use XML in the prompt
+- blocks for the reasoning of the model.
+
+The SDK of a provider does this work for the developer. The SDK shows the input
+as items with a structure, for example `messages` and `tools`. It shows the
+output as items with a structure, for example `ToolCall`. Developers want to
+change these items. The SDK does these steps:
+
+1. It serializes the input items into the text format of the protocol.
+2. The model operates as `text → text`.
+3. It parses the output stream back into items with a structure.
+
+The theory keeps these layers apart:
+
+- The **LLM** is the `text → text` core: the model after its training.
+- The **[Prompt](prompt.md)** is the input with a structure. It also includes
+  the change of this input into text.
+- The [AgentLoop](../harness/agent-loop.md) parses the output text into items
+  with a structure.
+
+Thus an Agent can change its provider or its protocol, and the LLM keeps the
+same function in the theory. It is always the function that does the reasoning.
 
 ## Related
 
-- [Tool](tool.md) — the other primitive; LLM reasons, Tool acts
-- [Prompt](prompt.md) — the structured input to the LLM; the protocol lives here
-- [AgentLoop](../harness/agent-loop.md) — assembles the Prompt, calls the LLM, parses the output stream
-- [PromptLoading](../patterns/prompt-loading.md) — strategies for filling the Prompt
-- [Memory](../patterns/memory.md) — how persistence is built on top of statelessness
+- [Tool](tool.md): the LLM does the reasoning, and the Tool does the operations.
+  The Tool is one of the primitives too.
+- [Prompt](prompt.md): the input to the LLM. The protocol is in the Prompt.
+- [AgentLoop](../harness/agent-loop.md): makes the Prompt, calls the LLM and
+  parses the output stream.
+- The pattern [PromptLoading](../patterns/prompt-loading.md) puts text from
+  different sources into the Prompt.
+- [Memory](../patterns/memory.md): how systems keep data on top of an LLM that
+  keeps no data.

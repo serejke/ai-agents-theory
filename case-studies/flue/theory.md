@@ -1,35 +1,173 @@
-# Flue Against the Theory: PI + Deploy Layer
+<a id="flue-against-the-theory-pi--deploy-layer"></a>
 
-Flue is built directly on top of PI's two core packages: [`@mariozechner/pi-ai`](../pi.md) (LLM/Prompt unification) and `@mariozechner/pi-agent-core` (the AgentLoop with Guardrail hooks). The [PI case study](../pi.md) decomposes that lower half against the theory; the same decomposition applies unchanged to Flue. What follows is what Flue _adds_ on top.
+# Flue against the theory
 
-## Inherited from PI
+Flue is directly on top of the two core packages of PI.
+[`@mariozechner/pi-ai`](../pi.md) gives one interface for the LLM and the
+Prompt. `@mariozechner/pi-agent-core` gives the AgentLoop with Guardrail hooks.
+The [PI case study](../pi.md) compares these parts with the theory. The same
+result applies to Flue with no changes. This document tells which parts Flue
+adds on top of PI.
 
-[LLM](../../primitives/llm.md) and [Prompt](../../primitives/prompt.md) primitives via `pi-ai` (15+ providers, one stream API). The [AgentLoop](../../harness/agent-loop.md) while-loop and [Guardrail](../../harness/guardrail.md) hooks (`beforeToolCall`/`afterToolCall`) via `pi-agent-core`. Linear [Session](../../harness/session.md) history. Compaction as a Session-local [PromptLoading](../../patterns/prompt-loading.md) transform.
+<a id="one-line-position"></a>
 
-## Added by Flue
+## The position of Flue
 
-1. **[Frontend](../../harness/agent.md) = HTTP service.** PI ships five Frontends (TUI / print / JSON / RPC / SDK) wrapping one running cognitive core in a single process. Flue's Frontend is structurally different: a generated HTTP server with route-per-agent webhook triggers (and cron manifest entries) declared in the agent file and emitted by the build. The deploy unit _is_ the harness.
+PI applies the rule "primitives, not features" to a coding agent for one user.
+Flue gives the same primitives as a unit that you deploy for many tenants.
 
-2. **[Environment](../../environment/environment.md) as a runtime-pluggable substrate (`SessionEnv`).** PI assumes the local Environment (host filesystem + processes). Flue introduces a uniform `exec + fs + cwd + scope` interface with four adapters — in-memory just-bash, host mount, `BashFactory`, and external `SandboxFactory` connectors (Daytona / Vercel / CF Containers). In theory terms, Environment becomes a _parameter_ of the Agent rather than a fixed property of the host process, which is what makes "write once, deploy on Node / Cloudflare / GitHub Actions" tractable.
+- PI does not have some parts because of its product. Flue adds these parts:
+  Topology, Sessions that stay in storage for many tenants, and an Environment
+  for each runtime.
+- PI does not have some parts because of a rule. Flue also does not have these
+  parts: StateMachine and Memory.
 
-3. **[Topology](../../patterns/topology.md) baked in (`task` subagents).** PI explicitly leaves Topology out — _"no sub-agents; build with extensions or spawn pi instances via tmux."_ Flue ships it: `session.task()` spawns a child Session with derived context, depth-bounded to 4, and the LLM can autonomously delegate via the built-in `task` tool. One of PI's deliberate gaps, closed.
+<a id="inherited-from-pi"></a>
 
-4. **A typed-eager Skill invocation contract.** PI Skills are lazy progressive-disclosure (model decides to read `SKILL.md`). Flue keeps lazy Skills _and_ adds an eager call-site form: `session.skill(name, { args, result: schema })` returns valibot-validated structured output. A fifth [PromptLoading](../../patterns/prompt-loading.md) flavor — eager-on-user-invocation with a typed contract — that PI doesn't expose.
+## The parts that Flue gets from PI
 
-5. **Roles as a built-in multi-persona substrate.** Build-time-bundled markdown files in `roles/` with frontmatter (description, optional model pin). Roles compose into `<role>...</role>` system-prompt blocks with `per-call > session > agent` precedence. PI has no native role concept — you'd build it with extensions.
+- The primitives [LLM](../../primitives/llm.md) and
+  [Prompt](../../primitives/prompt.md), through `pi-ai`. It has more than 15
+  providers and one API that gives the output in parts.
+- The [AgentLoop](../../harness/agent-loop.md) as a `while` loop, and the
+  [Guardrail](../../harness/guardrail.md) hooks `beforeToolCall` and
+  `afterToolCall`, through `pi-agent-core`.
+- A [Session](../../harness/session.md) history in one line, with no branches.
+- Compaction as a change of the
+  [PromptLoading](../../patterns/prompt-loading.md) pattern that operates only
+  in the Session.
 
-6. **Pluggable persistence + multi-tenancy.** PI persists sessions as local JSONL (the shared-prefix session-graph). Flue parameterizes persistence via `SessionStore`: `InMemorySessionStore` on Node, **Durable Object SQLite** on Cloudflare so a session resumes on the same DO across requests, weeks later. Session ID arrives in the request path — multi-tenancy is structural, not a usage convention. A real substrate for the [Continuity](../../patterns/continuity.md) pattern, even though Flue doesn't ship Continuity itself.
+<a id="added-by-flue"></a>
 
-7. **Per-call scoped runtime overrides.** Tools, model, system prompt, role, and commands are swappable for one `prompt` / `skill` / `task` call via a snapshot/restore wrapper around `pi-agent-core`'s `Agent`. PI's Agent state is more monolithic; per-call tool sets require extensions. Flue makes the swap a structural feature so the same Session can serve different roles/models on different turns without forking.
+## The parts that Flue adds
 
-8. **Provider precedence chain.** Inherits `pi-ai` but adds `provider/model-id` strings + per-provider runtime settings (`baseUrl` / `headers` / `apiKey`) with `per-call > role > agent` precedence. Makes API gateways (LiteLLM, enterprise proxies) first-class.
+### An HTTP service as the frontend
 
-9. **AI-generated connectors as a distribution model.** PI distributes capabilities as `pi install npm:@foo/pi-tools` — npm/git package boundaries. Flue's `flue add <provider-url>` pipes a markdown spec to a coding agent (Claude/Codex), which writes the `SandboxFactory` adapter into the user's project. The extension contract isn't a runtime API — it's a _prompt-to-an-agent_ API. Distribution shifts from "ship a package" to "ship a spec the agent compiles into your repo."
+PI has five [frontends](../../harness/agent.md): an interface in the terminal, a
+mode that prints the output, JSON, RPC and SDK. Each of them is around one core
+of the agent that runs in one process. The frontend of Flue has a different
+structure. It is an HTTP server that the build writes:
 
-## Same gaps as PI
+- Each agent has an endpoint.
+- The file of the agent declares its webhook triggers and the cron entries of
+  the manifest.
+- The build writes the server from these triggers.
 
-No [StateMachine](../../patterns/state-machine.md) / plan mode (single-phase loop). No first-class [Memory](../../patterns/memory.md) — `AGENTS.md` is eager [PromptLoading](../../patterns/prompt-loading.md) from the sandbox cwd, not Memory in the theory's sense. No [Continuity](../../patterns/continuity.md) implementation, though `SessionStore` + DO SQLite + sandbox-mounted markdown finally provides the substrate to build it on.
+Thus the unit that you deploy is the harness.
 
-## One-line position
+### An Environment that you can change: `SessionEnv`
 
-If PI is _"primitives, not features"_ applied to a single-user coding agent, **Flue is the same primitives repackaged as a multi-tenant deploy unit, closing the gaps PI left out for product reasons (Topology, persistent multi-tenancy, runtime-agnostic Environment) and accepting the gaps PI left out on principle (StateMachine, Memory).**
+PI uses the local [Environment](../../environment/environment.md): the
+filesystem and the processes of the host. Flue adds one interface with `exec`,
+`fs`, `cwd` and `scope`. This interface has four adapters:
+
+- a `just-bash` shell in memory
+- the filesystem of the host
+- `BashFactory`
+- external `SandboxFactory` connectors, for example Daytona, Vercel and
+  Cloudflare Containers.
+
+In the words of the theory, the Environment becomes a parameter of the Agent. It
+is not a property of the host process that stays the same. Thus you can write an
+agent one time and deploy it on Node, Cloudflare or GitHub Actions.
+
+### Topology in the framework: `task` subagents
+
+PI does not have [Topology](../../patterns/topology.md), by decision: "no
+sub-agents; build with extensions or spawn pi instances via tmux." Flue has it:
+
+- `session.task()` starts a new Session for a subagent. The context of the new
+  Session comes from the first Session.
+- The maximum depth of these Sessions is 4.
+- The LLM can also give a task to a subagent with the `task` tool.
+
+Thus Flue adds a part that PI does not have by decision.
+
+### Skill calls with a result that has a type
+
+In PI, the model selects when to read the `SKILL.md` of a skill. Flue keeps
+these skills. It also adds a call that the code of the user starts:
+`session.skill(name, { args, result: schema })`. This call gives an output with
+a structure, and `valibot` examines the output against the schema.
+
+This call is one more variant of
+[PromptLoading](../../patterns/prompt-loading.md). The harness loads the skill
+when the user calls it, and the result has a contract with a type. PI does not
+give this variant.
+
+### Roles for different agent instructions
+
+The roles are Markdown files in `roles/`. The build puts them into the output.
+The frontmatter of each role gives a description and, as an option, a model.
+Each role becomes a `<role>...</role>` block of the system prompt.
+
+Flue selects the role in this sequence:
+
+1. the role of the call
+2. the role of the Session
+3. the role of the agent.
+
+PI has no role concept. In PI, you make roles with extensions.
+
+### Storage that you can change, for many tenants
+
+PI keeps the Sessions as local `.jsonl` files, in a graph of Sessions. The
+Sessions of the graph can have the same start. Flue makes the storage a
+parameter with `SessionStore`:
+
+- `InMemorySessionStore` on Node
+- **Durable Object SQLite** on Cloudflare. A Session continues on the same
+  Durable Object across requests, also after some weeks.
+
+The Session ID comes in the path of the request. Thus the Sessions of each
+tenant stay apart because of the structure of Flue, not because of a rule for
+the user. Thus the [Continuity](../../patterns/continuity.md) pattern can use
+this storage. Flue does not supply the Continuity pattern.
+
+### Changes for one call: the scoped runtime
+
+For one call of `prompt`, `skill` or `task`, you can change the tools, the
+model, the system prompt, the role and the commands. The scoped runtime keeps a
+snapshot of the `Agent` of `pi-agent-core`, does the call and then puts back the
+snapshot. PI keeps the data of its Agent as one block. In PI, tools for one call
+are possible only with extensions. Flue makes this change a part of its
+structure. Thus one Session can use different roles and models on different
+turns, and Flue does not make a second copy of the Session.
+
+### The sequence of providers
+
+Flue uses `pi-ai` and adds two functions:
+
+- `provider/model-id` strings
+- runtime values for each provider: `baseUrl`, `headers` and `apiKey`.
+
+Flue selects these values in this sequence: the call, then the role, then the
+agent. Thus Flue can send all model calls through a server between the agent and
+the providers, for example LiteLLM or a server of a company.
+
+### Connectors that an AI agent writes
+
+PI gives new functions as packages, for example `pi install npm:@foo/pi-tools`.
+The boundary is an npm package or a git package.
+
+Flue uses a different method. `flue add <provider-url>` sends a Markdown
+specification to a coding agent, for example Claude or Codex. The coding agent
+writes the `SandboxFactory` adapter into the project of the user. Thus the
+contract for extensions is not an API of the runtime. It is a prompt to an
+agent.
+
+You do not send a package. You send a specification, and the agent compiles it
+into your repository.
+
+<a id="same-gaps-as-pi"></a>
+
+## The parts that Flue and PI do not have
+
+- **No [StateMachine](../../patterns/state-machine.md) and no plan mode.** The
+  loop has one phase.
+- **No [Memory](../../patterns/memory.md) as a basic part.** `AGENTS.md` is
+  [PromptLoading](../../patterns/prompt-loading.md) at the start of the Session,
+  from the folder of the Session in the sandbox. It is not Memory in the meaning
+  of the theory.
+- **No [Continuity](../../patterns/continuity.md).** But you can make it with
+  `SessionStore`, Durable Object SQLite and the Markdown files in the sandbox.

@@ -1,21 +1,50 @@
 # Memory
 
-Memory is a persistent read+write store of extracted knowledge that survives across Sessions. It is what separates an Agent that starts from zero every time from one that accumulates experience over time. Memory is a content source; its content reaches the [Prompt](../primitives/prompt.md) via a [PromptLoading](prompt-loading.md) strategy (usually dynamic retrieval).
+Memory is a storage of knowledge that an agent can read and write, and that
+stays after the end of a work session. With Memory, an agent does not start from
+zero each time: it keeps the knowledge of its previous sessions. This pattern is
+a source of text. A method of [PromptLoading](prompt-loading.md) moves this text
+into the [Prompt](../primitives/prompt.md), usually with a step that finds the
+related entries on each turn.
 
-**Composition**: [Tool](../primitives/tool.md)-set (`recall`, `remember`) over persistent storage, plus the semantic role of storing _extracted knowledge_ rather than raw artifacts. Distinguished from a generic Tool by its cognitive role (long-term recall across sessions) and by its persistence guarantee (survives Session boundaries).
+**Composition**: a set of [Tools](../primitives/tool.md) (`recall` and
+`remember`) on a storage that stays across Sessions. The storage keeps the
+knowledge that the agent got from its work, not the full data of the work.
+Memory is different from a usual Tool because it gives knowledge from previous
+Sessions, and because its data stays after the end of a Session.
 
-## Why It Matters
+<a id="why-it-matters"></a>
 
-The [LLM](../primitives/llm.md) is stateless. [Session](../harness/session.md) gives it history within a single conversation (`history: Message[]`), but this history is bounded by the context window (~200K tokens) and ephemeral — close the terminal, everything's lost. Each new session starts from zero: re-reads code, re-discovers architecture, doesn't remember that yesterday you decided not to use Tailwind and why.
+## Value
 
-Memory closes this gap. It extracts knowledge from interactions, persists it across sessions, and retrieves relevant knowledge when starting new work. Without Memory, every agent interaction is a first encounter. With it, the agent behaves less like a new contractor and more like a team member.
+Without Memory, each new Session starts from zero. The agent reads the code
+again and finds the structure of the code again. It does not know that in the
+previous Session you selected not to use Tailwind. It also does not know the
+cause of this decision.
 
-## Formal Definition
+This occurs because of these properties of the other parts:
+
+- The [LLM](../primitives/llm.md) keeps no data between calls.
+- A [Session](../harness/session.md) gives the LLM a history in one conversation
+  (`history: Message[]`). The context window gives a limit to this history:
+  approximately 200,000 tokens.
+- The history does not stay. When you close the terminal, the agent cannot get
+  the history back.
+
+Memory gives the agent knowledge across Sessions. It gets knowledge from the
+work, keeps it after the Session, and finds the related knowledge when new work
+starts. Without Memory, each conversation with the agent is the first
+conversation. With Memory, the agent operates as a worker who knows the project,
+not as a new worker.
+
+<a id="formal-definition"></a>
+
+## Definition
 
 ```typescript
 type Memory = {
-  recall: (query: string) => MemoryEntry[]; // what from past experience is relevant now?
-  remember: (entries: MemoryEntry[]) => void; // extract and save knowledge from current interaction
+  recall: (query: string) => MemoryEntry[]; // which past knowledge is related to the current work?
+  remember: (entries: MemoryEntry[]) => void; // get knowledge from the current work and keep it
 };
 
 type MemoryEntry = {
@@ -23,21 +52,31 @@ type MemoryEntry = {
   scope: "global" | "project" | "task";
   kind: "episodic" | "semantic" | "procedural";
   timestamp: Date;
-  source: string; // which session, issue, or PR this came from
+  source: string; // the session, issue, or PR that gave this entry
 };
 ```
 
-Memory is a content source with persistence semantics; [PromptLoading](prompt-loading.md) is how that content reaches the [Prompt](../primitives/prompt.md). A typical setup: `remember()` writes to the store at session boundaries (or continuously); `recall(query)` is invoked dynamically per turn by a PromptLoading strategy that retrieves relevant entries and inserts them into the Prompt.
+A usual configuration of Memory and [PromptLoading](prompt-loading.md) has these
+steps:
 
----
+- `remember()` writes to the storage at the end of each Session, or at each step
+  of the work.
+- On each turn, a method of PromptLoading calls `recall(query)`. It finds the
+  related entries and adds them to the [Prompt](../primitives/prompt.md).
+
+<a id="types-of-memory"></a>
 
 ## Types of Memory
 
-By analogy with cognitive science, agent memory divides into three kinds that serve different purposes.
+The memory of an agent has the same types as the memory of a person. Each type
+has a different function. The `kind` field of an entry gives its type.
 
-### Episodic — "what happened"
+<a id="episodic--what-happened"></a>
 
-Events, outcomes, and experiences from past interactions.
+### `episodic`: previous work
+
+The `episodic` type keeps the results of previous work: the steps, their results
+and the decisions of the user.
 
 ```typescript
 // "Last time we changed routing, auth tests broke"
@@ -51,9 +90,12 @@ Events, outcomes, and experiences from past interactions.
 }
 ```
 
-### Semantic — "what I know"
+<a id="semantic--what-i-know"></a>
 
-Facts about the project, the codebase, the domain, and the user's preferences.
+### `semantic`: facts
+
+The `semantic` type keeps facts about the project, the code, the area of the
+work, and the rules that the user wants.
 
 ```typescript
 // "This project uses CSS custom properties, not Tailwind"
@@ -67,9 +109,12 @@ Facts about the project, the codebase, the domain, and the user's preferences.
 }
 ```
 
-### Procedural — "how to do it"
+<a id="procedural--how-to-do-it"></a>
 
-Learned workflows and patterns for accomplishing tasks in this context.
+### `procedural`: methods
+
+The `procedural` type keeps the workflows that the agent found for the tasks of
+this project.
 
 ```typescript
 // "After code changes always run npm run lint && npm run build"
@@ -84,68 +129,95 @@ Learned workflows and patterns for accomplishing tasks in this context.
 }
 ```
 
----
+<a id="architectural-questions"></a>
 
-## Architectural Questions
+## Decisions of a memory system
 
-The design of any memory system reduces to four decisions.
+Each memory system has these decisions: when the agent writes, which data it
+keeps, how it finds the data, and where the data is.
 
-### 1. When is it written?
+<a id="1-when-is-it-written"></a>
+
+### When the agent writes
 
 ```typescript
 type WriteStrategy =
-  | "manual" // human writes CLAUDE.md by hand
-  | "explicit" // agent explicitly calls remember() (Claude /remember)
+  | "manual" // a person writes CLAUDE.md
+  | "explicit" // the agent calls remember() (Claude /remember)
   | "on_session_end" // automatic extraction after each session
-  | "continuous"; // agent writes during work
+  | "continuous"; // the agent writes during the work
 ```
 
-Today the dominant strategies are `manual` (CLAUDE.md) and `explicit` (Claude `/remember`). Both depend on the human — humans forget, get lazy, and don't know what's important for the agent. The gap is `on_session_end`: automatic extraction of decisions and preferences after each session without human intervention.
+The usual methods are `manual` (`CLAUDE.md`) and `explicit` (Claude
+`/remember`). A person must do the work in the two methods. A person does not
+always do the work, and does not always know which facts are important to the
+agent. The `on_session_end` method operates without a person. After each
+Session, it gets the decisions and the rules of the user from the history
+automatically.
 
-### 2. What is saved?
+<a id="2-what-is-saved"></a>
+
+### Which data the agent keeps
 
 ```typescript
 type ExtractionStrategy =
-  | "raw_conversation" // entire dialog (too much, doesn't scale)
-  | "summary" // session compression (loses details)
-  | "facts" // extracted facts: "project uses X"
-  | "decisions" // decisions + rationale: "chose X because Y"
-  | "preferences"; // human preferences: "doesn't like Z"
+  | "raw_conversation" // the full conversation (too much data)
+  | "summary" // a short version of the session (loses details)
+  | "facts" // facts: "project uses X"
+  | "decisions" // decisions and their causes: "chose X because Y"
+  | "preferences"; // rules of the person: "doesn't like Z"
 ```
 
-The most valuable and hardest to extract: `decisions` + `preferences`. This is exactly what distinguishes a "new contractor" from a "team member" — knowing not just what the project uses, but why specific choices were made and what the human cares about.
+The `decisions` and the `preferences` have the most value. It is also not easy
+to get them from the history. They make the difference between a new worker and
+a worker who knows the project. That worker knows which tools the project uses.
+The worker also knows the causes of the decisions and the rules that are
+important to the user.
 
-### 3. How is it retrieved?
+<a id="3-how-is-it-retrieved"></a>
+
+### How the agent finds the data
 
 ```typescript
 type RetrievalStrategy =
-  | "always_load" // load everything (CLAUDE.md today)
-  | "keyword_search" // grep over memory
-  | "semantic_search" // embedding + vector similarity (RAG)
-  | "llm_curated"; // LLM decides what's relevant for current task
+  | "always_load" // load all of it (CLAUDE.md)
+  | "keyword_search" // grep over the memory
+  | "semantic_search" // embedding and vector similarity (RAG)
+  | "llm_curated"; // an LLM selects the entries for the current task
 ```
 
-`always_load` works while memory is small (CLAUDE.md under ~1000 lines). For real persistent memory you need `semantic_search` or `llm_curated` — strategies that scale with the volume of accumulated knowledge.
+`always_load` operates while the memory is small, for example a `CLAUDE.md` file
+of less than approximately 1000 lines. For a large memory that increases across
+Sessions, use `semantic_search` or `llm_curated`. These methods continue to
+operate when the quantity of knowledge increases.
 
-A fifth retrieval strategy — **structural navigation** — emerges when memory is organized hierarchically. The agent traverses a directory tree, using names as semantic cues to find relevant context. See [Workspace](workspace.md) for this approach.
+One more method is possible when the memory is a tree of folders. The agent
+moves through the tree and uses the names of the folders and files to find the
+related context. [Workspace](workspace.md) tells about this method.
 
-### 4. Where does it live?
+<a id="4-where-does-it-live"></a>
+
+### Where the data is
 
 ```typescript
 type StorageBackend =
   | "local_file" // .claude/CLAUDE.md, .claude/memories/
-  | "git_repo" // committed with code (versioned!)
-  | "database" // vector DB for semantic search
-  | "platform"; // provider's cloud (Claude.ai projects)
+  | "git_repo" // in a commit with the code (with versions)
+  | "database" // vector database for semantic search
+  | "platform"; // the cloud of the provider (Claude.ai projects)
 ```
 
-The `git_repo` option is particularly interesting: memory becomes part of the project. A new developer (or agent) gets memory along with `git clone`. It's onboarding documentation written by an agent for agents.
+With `git_repo`, the memory is a part of the project. A new developer or a new
+agent gets the memory with `git clone`. It is documentation for new workers, and
+an agent writes it for agents.
 
----
+<a id="scopes"></a>
 
-## Scopes
+## Levels of Memory
 
-Memory operates at three levels that nest during recall:
+Memory has a `global` level, a `project` level and a `task` level. When the
+agent makes its context, it uses the levels together, from the `global` level to
+the `task` level.
 
 ```typescript
 type MemoryScope = {
@@ -154,44 +226,67 @@ type MemoryScope = {
   task: Memory; // "in task #42 we already tried approach X, didn't work"
 };
 
-// Scopes nest during context assembly
+// The levels go into the context one after the other
 const buildContextWithMemory = (task: string): string => {
-  const globalMem = globalMemory.recall(task); // human preferences
-  const projectMem = projectMemory.recall(task); // project knowledge
+  const globalMem = globalMemory.recall(task); // rules of the person
+  const projectMem = projectMemory.recall(task); // knowledge of the project
   const taskMem = taskMemory.recall(task); // history of this task
   return [systemPrompt, ...globalMem, ...projectMem, ...taskMem].join("\n");
 };
 ```
 
----
+<a id="current-implementations-and-gaps"></a>
 
-## Current Implementations and Gaps
+## Implementations
 
-| Implementation         | Memory Type           | Write     | Recall          | Scope          |
-| ---------------------- | --------------------- | --------- | --------------- | -------------- |
-| **CLAUDE.md**          | semantic + procedural | manual    | always_load     | project        |
-| **Claude `/remember`** | any                   | explicit  | always_load     | global         |
-| **Git history**        | episodic              | automatic | no recall       | project        |
-| **GitHub Issues/PRs**  | episodic + decisions  | automatic | keyword search  | project + task |
-| **RAG over codebase**  | semantic              | automatic | semantic_search | project        |
-| **Claude.ai Projects** | semantic              | manual    | always_load     | project        |
+| Implementation               | `kind`                   | `WriteStrategy` | `RetrievalStrategy` | `MemoryScope` |
+| ---------------------------- | ------------------------ | --------------- | ------------------- | ------------- |
+| `CLAUDE.md`                  | `semantic`, `procedural` | `manual`        | `always_load`       | project       |
+| Claude `/remember`           | all types                | `explicit`      | `always_load`       | `global`      |
+| History of git               | `episodic`               | automatic       | none                | project       |
+| GitHub issues, pull requests | `episodic`, decisions    | automatic       | `keyword_search`    | project, task |
+| RAG on the code              | `semantic`               | automatic       | `semantic_search`   | project       |
+| Projects of Claude.ai        | `semantic`               | `manual`        | `always_load`       | project       |
 
-The main gap: no system that automatically (`on_session_end`) extracts `decisions` + `preferences` and saves them in a format accessible for semantic recall on the next launch. Today the closest approximation is a human manually updating CLAUDE.md after a series of sessions — the human effectively performs the `remember()` function for the agent.
+No implementation in this table does all of these steps automatically:
 
----
+- At the end of each Session, it gets the decisions and the rules of the user
+  (`on_session_end` with `decisions` and `preferences`).
+- It keeps them in a format for `semantic_search` in the next Session.
 
-## CLAUDE.md as Disguised Shared Memory
+The nearest equivalent is a person who changes `CLAUDE.md` after some Sessions.
+That person does the work of `remember()` for the agent.
 
-CLAUDE.md is Memory in its most basic form. Write "No Tailwind, use CSS custom properties" — that's semantic memory. Write "After changes, run lint && build" — that's procedural memory. But it's a manual process with limited capacity — a large CLAUDE.md stops working because `always_load` fills the context window.
+<a id="claudemd-as-disguised-shared-memory"></a>
 
-The breakthrough is when the loop closes: the agent itself writes to memory after each session (`on_session_end` + `decisions` extraction) and itself chooses what to retrieve for the next task (`semantic_search` or `llm_curated` recall). Then CLAUDE.md transforms from a static file into a living, growing knowledge base — and every new agent connecting to the project starts not from zero, but with the accumulated experience of all previous sessions.
+## `CLAUDE.md` as the Memory of the project
 
----
+`CLAUDE.md` is the most basic Memory. The line "No Tailwind, use CSS custom
+properties" is `semantic` memory. The line "After changes, run lint && build" is
+`procedural` memory. But a person writes this file manually, and its capacity
+has a limit. A large `CLAUDE.md` fails, because `always_load` fills the context
+window.
+
+The full Memory pattern closes this loop:
+
+- The agent writes to the memory after each Session (`on_session_end` with
+  `decisions`).
+- The agent selects the knowledge for the next task (`semantic_search` or
+  `llm_curated`).
+
+Then `CLAUDE.md` changes with each Session: it becomes a store of knowledge that
+increases. Each new agent on the project starts with the knowledge of all
+previous Sessions, not from zero.
 
 ## Related
 
-- [LLM](../primitives/llm.md) — stateless; Memory is what gives persistence on top of statelessness
-- [PromptLoading](prompt-loading.md) — strategies for getting Memory content into the Prompt; Memory is the source, PromptLoading is the delivery mechanism
-- [Session](../harness/session.md) — within-conversation history; Memory is the cross-session equivalent
-- [Channel](channel.md) — passes data within a run; Memory persists knowledge across runs
-- [Continuity](continuity.md) — composes Memory with other patterns for multi-session task progress
+- [LLM](../primitives/llm.md) keeps no data between calls. Memory gives
+  knowledge that stays.
+- [PromptLoading](prompt-loading.md) moves the text of Memory into the Prompt.
+  Memory is the source of the text.
+- [Session](../harness/session.md) keeps the history of one conversation. Memory
+  keeps knowledge across Sessions.
+- [Channel](channel.md) moves data in one run. Memory keeps knowledge across
+  runs.
+- [Continuity](continuity.md) composes Memory with other patterns. Then a task
+  can continue across Sessions.

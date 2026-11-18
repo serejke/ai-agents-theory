@@ -1,14 +1,28 @@
-# Verification Strategies
+<a id="verification-strategies"></a>
 
-Distinct techniques for verifying agent systems. [Seams](seams.md) define _where_ to test; strategies define _what_ to assert and _when_ to run it. Each strategy combines trace capture, seam substitution, and assertion differently, and each catches a class of failures the others miss.
+# Verification methods
 
-## Strategy: Shell Testing
+A verification method is one type of test for an agent system. The
+[seams](seams.md) tell where a test can replace a part. A method tells the
+checks that the test does and when the test runs. Each method uses the trace,
+the seams and the checks differently. Thus each method finds a type of error
+that the other methods do not find.
 
-**What:** Replace the LLM with a mock. Test all deterministic logic end-to-end.
+[The verification stack](index.md#the-verification-stack) compares the methods.
 
-**Asserts on:** Prompt assembly, data transforms, channel I/O, output formatting, file writes, state transitions.
+<a id="strategy-shell-testing"></a>
 
-**When:** Every code change. Fast, free, deterministic.
+## Shell tests
+
+A shell test replaces the LLM with a mock. Then it examines all the
+deterministic code of the system, from the input to the output.
+
+- **Checks**: all the deterministic steps. Examples are the assembly of the
+  prompt, the changes to the data and the input and output of the channels.
+  Other examples are the format of the output, the file writes and the changes
+  of phase.
+- **When**: at each change of the code. Shell tests are fast, free and
+  deterministic.
 
 ```typescript
 const mockLlm = createMock({ responses: ["# Mock Report\n\nNarrative."] });
@@ -16,35 +30,51 @@ const workspace = createTempWorkspace(fixtureData);
 
 await reportPipeline.run(workspace, { llm: mockLlm });
 
-// Deterministic assertions:
+// Deterministic checks:
 assert(mockLlm.calls.length === 1); // LLM called once
 assert(mockLlm.calls[0].stdinData.includes("wallet data")); // correct input assembled
 assert(workspace.read("report.md") === "# Mock Report\n\nNarrative."); // output written
-assert(workspace.exists("dimensions/wallet-summaries.json")); // intermediaries produced
+assert(workspace.exists("dimensions/wallet-summaries.json")); // intermediate files written
 ```
 
-This tests everything _except_ the LLM's behavior. It catches: broken data transforms, missing files, incorrect prompt templates, wrong tool wiring, broken state transitions. These are the bugs that ship most often — plumbing failures, not reasoning failures.
+A shell test examines all the system, but not the operation of the LLM. It finds
+these bugs:
 
-**Limitation:** Says nothing about whether the real LLM would produce good output for the assembled prompt.
+- code that changes the data incorrectly
+- files that are not there
+- an incorrect format of the prompt
+- tools with incorrect connections
+- incorrect changes of phase.
 
-## Strategy: Property-Based Output Verification
+These bugs go to the users most frequently. They are errors in the connections
+between the parts, not errors of reasoning.
 
-**What:** Run the real LLM. Assert on _structural properties_ of the output, not exact text.
+**Limit**: a shell test does not tell if the LLM gives a good output for the
+assembled prompt.
 
-**Asserts on:** Output contains required sections. Output parses as valid JSON/markdown. Output mentions all input entities. Output stays within length bounds.
+<a id="strategy-property-based-output-verification"></a>
 
-**When:** On prompt changes, model upgrades, or scheduled (nightly). Slow, costs money, non-deterministic.
+## Property checks
+
+A property check runs the LLM and examines the structural properties of the
+output, not its words.
+
+- **Checks**: the output has the necessary sections. It parses as correct JSON
+  or Markdown. It includes each item of the input. Its length is in the limits.
+- **When**: at each change of the prompt or of the model version, or at regular
+  intervals. Property checks are slow and not deterministic. The model provider
+  charges for each call.
 
 ```typescript
 const result = await reportPipeline.run(realWorkspace, { llm: realLlm });
 const report = workspace.read("report.md");
 
-// Property assertions (not exact text):
-assert(report.length > 500); // not empty/truncated
-assert(report.includes("## Summary")); // has required section
-assert(report.includes("Test Wallet")); // mentions the wallet
-assert(!report.includes("undefined")); // no template artifacts
-assert(!report.includes("0xaaaa1111")); // addresses resolved to labels
+// Property checks, not text comparison:
+assert(report.length > 500); // not empty or cut off
+assert(report.includes("## Summary")); // has the necessary section
+assert(report.includes("Test Wallet")); // names the wallet
+assert(!report.includes("undefined")); // no template leftovers
+assert(!report.includes("0xaaaa1111")); // addresses replaced with labels
 
 // For structured output:
 const parsed = JSON.parse(workspace.read("analysis.json"));
@@ -52,23 +82,39 @@ assert(parsed.wallets.length === expectedWalletCount);
 assert(parsed.wallets.every((w) => w.totalUsd >= 0)); // no negative balances
 ```
 
-Property assertions tolerate non-determinism — the LLM can rephrase freely as long as structural properties hold. This catches: prompt regressions (changed prompt → missing section), model degradation (new model version → worse outputs), data-dependent failures (edge case input → broken output).
+Property checks accept outputs that are not deterministic. The LLM can use
+different words, if the structural properties stay correct. Property checks find
+these errors:
 
-**Key principle:** Assert on what _must_ be true, not what the output _looks like_. "Report mentions all wallets" is a property. "Report starts with 'This portfolio consists of'" is a brittle match.
+- A change of the prompt removes a section from the output.
+- A new model version gives worse outputs.
+- Some input data breaks the output, for example an unusual input.
 
-## Strategy: LLM-as-Judge
+**Rule**: examine the facts that must be correct, not the text of the output.
+"Report mentions all wallets" is a property. "Report starts with 'This portfolio
+consists of'" is not a property. It compares the text, and a small change of the
+words breaks it.
 
-**What:** Use a second LLM to evaluate the first LLM's output against criteria. This is the [Evaluator](../patterns/evaluator.md) pattern deployed offline.
+<a id="strategy-llm-as-judge"></a>
 
-**Asserts on:** Quality dimensions — coherence, accuracy, completeness, tone — that can't be captured with structural assertions.
+## LLM judge
 
-**When:** Scheduled, or on prompt/model changes. Expensive (two LLM calls per eval).
+An LLM judge is a second LLM that examines the output of the first LLM against a
+list of rules. It is the [Evaluator](../patterns/evaluator.md) pattern, but it
+runs in the tests, not in the run of the agent.
+
+- **Checks**: the quality properties that structural checks cannot examine. For
+  example, the text is clear, the facts are correct, the text includes all the
+  input, and the words are applicable to the reader.
+- **When**: at regular intervals, or at each change of the prompt or of the
+  model. Each test uses two LLM calls. Thus the model provider charges the most
+  for this method.
 
 ```typescript
 type EvalCriterion = {
   name: string;
-  description: string; // what "good" looks like
-  scoringGuide: string; // 1-5 scale rubric
+  description: string; // what a good output looks like
+  scoringGuide: string; // scale from 1 to 5
 };
 
 const criteria: EvalCriterion[] = [
@@ -100,20 +146,28 @@ const judge: Evaluator = async (task, result, evidence) => {
 };
 ```
 
-The same [Evaluator](../patterns/evaluator.md) implementation can be used for both runtime self-correction and offline quality tracking — define criteria once, deploy in two modes:
+One [Evaluator](../patterns/evaluator.md) implementation can do two tasks. It
+corrects the agent at runtime, and it monitors the quality in the tests. Write
+the rules one time, and use them in the two modes:
 
 ```
 Runtime Evaluator:   trigger=auto    → output=feedback loop (retry)
 Offline Evaluator:   trigger=CI/cron → output=score tracking (alert on regression)
 ```
 
-## Strategy: Trajectory Verification
+<a id="strategy-trajectory-verification"></a>
 
-**What:** Assert on the _sequence of actions_ the agent took, not just the final output.
+## Trajectory checks
 
-**Asserts on:** Correct tool selection, reasonable ordering, no redundant calls, cost bounds.
+A trajectory check examines the sequence of the steps of the agent, not only the
+last output.
 
-**When:** On agent logic changes (system prompt, tool definitions, guardrails). Requires [trace](trace.md) capture.
+- **Checks**: the agent selects the correct tools in the correct sequence. It
+  does not make calls that have no value. It stays in the limits of LLM calls
+  and tokens.
+- **When**: at each change to the instructions of the agent, for example the
+  system prompt, the tool definitions or the Guardrails. A trajectory check must
+  have the [trace](trace.md) of the run.
 
 ```typescript
 const trace = await runWithTracing(agent, task);
@@ -121,7 +175,7 @@ const trace = await runWithTracing(agent, task);
 // Tool selection:
 assert(trace.steps.some((s) => s.toolResults.find((t) => t.tool === "grep")));
 
-// Ordering:
+// Sequence:
 const toolSequence = trace.steps.flatMap((s) =>
   s.toolResults.map((t) => t.tool),
 );
@@ -129,11 +183,11 @@ const grepIndex = toolSequence.indexOf("grep");
 const writeIndex = toolSequence.indexOf("write_file");
 assert(grepIndex < writeIndex); // searched before writing
 
-// Cost bounds:
-assert(trace.metadata.totalLlmCalls <= 10); // not spinning
-assert(trace.metadata.totalTokens < 50_000); // not exploding context
+// Cost limits:
+assert(trace.metadata.totalLlmCalls <= 10); // no endless loop
+assert(trace.metadata.totalTokens < 50_000); // context does not grow out of control
 
-// No prohibited actions:
+// No prohibited operations:
 assert(
   trace.steps.every(
     (s) =>
@@ -144,39 +198,59 @@ assert(
 );
 ```
 
-Trajectory verification catches a class of bugs invisible to output-only testing: the agent that produces the right answer but takes 50 LLM calls to get there (cost explosion), the agent that reads the right file but also reads 30 irrelevant files (efficiency), the agent that deletes and recreates a file instead of editing it (fragility).
+Trajectory checks find bugs that a check of only the output cannot find:
 
-**Relationship to [Guardrails](../harness/guardrail.md):** Guardrails prevent bad actions _during_ execution. Trajectory verification confirms correct behavior _after_ execution. They're complementary: guardrails are runtime constraints, trajectory verification is offline assertions over the same action space.
+- The agent gives the correct result, but it uses 50 LLM calls for it. The model
+  provider charges for each of these calls.
+- The agent reads the correct file, but it also reads 30 files that are not
+  related to the task. It does much work that has no value.
+- The agent removes a file and writes all of it again. It does not change only
+  the necessary part. This procedure breaks easily.
 
-## Strategy: Snapshot / Golden File Testing
+**Relation to [Guardrails](../harness/guardrail.md)**: Guardrails stop bad
+operations during the run. Trajectory checks make sure after the run that the
+operations were correct. The two layers operate together. Guardrails are limits
+at runtime. Trajectory checks examine the same operations after the run.
 
-**What:** Capture a known-good output (or trace) as a reference. Fail if future runs diverge beyond a threshold.
+<a id="strategy-snapshot--golden-file-testing"></a>
 
-**Asserts on:** Stability — the system produces similar outputs over time.
+## Snapshot tests
 
-**When:** Every code change (for deterministic snapshots like prompts) or periodically (for LLM output snapshots with fuzzy comparison).
+A snapshot test keeps a known correct output or trace as a reference: a golden
+file. The test fails if a new run is too different from the golden file.
+
+- **Checks**: the system gives the same outputs, or almost the same outputs, at
+  each run.
+- **When**: at each change of the code, for deterministic snapshots, for example
+  of the prompt. For snapshots of LLM output, run the test at regular intervals.
+  These tests compare by meaning, not by text, and accept small differences.
 
 ```typescript
-// Snapshot the exact prompt sent to the LLM (deterministic)
+// Snapshot the full prompt sent to the LLM (deterministic)
 const trace = await runWithTracing(agent, task, { llm: mockLlm });
 const prompt = trace.steps[0].llmCall.messagesIn;
 expect(prompt).toMatchSnapshot("wallet-report-prompt");
-// Fails if prompt changes unexpectedly — catches accidental prompt regressions
+// Fails if the prompt changes by accident
 
-// Snapshot LLM output with fuzzy comparison (non-deterministic)
+// Snapshot LLM output with a comparison by meaning (non-deterministic)
 const output = await runWithRealLlm(agent, task);
 const similarity = cosineSimilarity(embed(output), embed(goldenOutput));
-assert(similarity > 0.85); // similar enough to golden file
+assert(similarity > 0.85); // close enough to the golden file
 ```
 
-Prompt snapshots are the highest-value, lowest-cost verification for agent systems. The prompt is the single most important artifact — it determines everything the LLM does. A snapshot test ensures no code change accidentally mutates the prompt (a template variable renamed, a context provider dropped, a formatting change). This is deterministic and free.
-
----
+Snapshots of the prompt are free, and they give more value than each other
+verification method. The prompt is the most important item of an agent system,
+because it controls all the work of the LLM. A snapshot test makes sure that no
+change of the code changes the prompt by accident. Examples are a renamed
+variable in the text of the prompt, a removed context provider and a change of
+the format. These tests are also deterministic.
 
 ## Related
 
-- [Verification](index.md) — the orthogonal concern these strategies implement
-- [Trace](trace.md) — the observable surface these strategies assert on
-- [Seams](seams.md) — the substitution points these strategies exploit
-- [Evaluator](../patterns/evaluator.md) — the pattern reused for LLM-as-judge
-- [Guardrail](../harness/guardrail.md) — runtime counterpart to trajectory verification
+- [Verification](index.md): the parts of verification and how they connect.
+- [The trace](trace.md): the data that these methods examine.
+- [Seams](seams.md): the points where these methods replace a part.
+- [Evaluator](../patterns/evaluator.md): the pattern that the LLM judge uses
+  again.
+- [Guardrail](../harness/guardrail.md): the runtime layer that operates together
+  with trajectory checks.

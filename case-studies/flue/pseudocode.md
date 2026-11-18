@@ -1,8 +1,17 @@
-# Flue — Conceptual Architecture in Pseudocode
+<a id="flue--conceptual-architecture-in-pseudocode"></a>
 
-I've stripped types, error paths, and most options. The goal is to make the _shape_ of the system legible — what calls what, where state lives, where the clever bits are.
+# Flue in pseudocode
 
-## Build time: workspace → deployable
+This document shows the structure of Flue as pseudocode. It shows which part
+calls which part, where Flue keeps the data, and where the unusual decisions
+are. The pseudocode does not show the types, the error paths and most options.
+
+<a id="build-time-workspace--deployable"></a>
+
+## At build time: from the project folder to the output
+
+The build reads the agents and the roles of the project folder. Then it writes
+the output for Node or for Cloudflare.
 
 ```
 build(workspaceDir, target):
@@ -25,7 +34,12 @@ build(workspaceDir, target):
         write(distDir/"wrangler.jsonc", merge(userWrangler, plugin.additions))
 ```
 
-## Runtime: the generated entry point
+<a id="runtime-the-generated-entry-point"></a>
+
+## At runtime: the entry that the build writes
+
+The build writes this entry. For each request, the entry makes a `FlueContext`
+and calls the handler of the agent. It sends each step to the client with SSE.
 
 ```
 # This is the file the build emits. Conceptually:
@@ -54,7 +68,11 @@ server.on(POST "/agents/:name", async req:
 )
 ```
 
-## The handler the user wrote
+<a id="the-handler-the-user-wrote"></a>
+
+## The handler of the user
+
+The user writes only this file. It runs in the server of the entry.
 
 ```
 # .flue/agents/support.ts  (user code, runs inside the server above)
@@ -69,7 +87,12 @@ export default async (ctx):
                                 { role: "triager" })
 ```
 
-## `init()` — building the FlueAgent
+<a id="init--building-the-flueagent"></a>
+
+## `init()`: how Flue makes the `FlueAgent`
+
+`init()` changes the sandbox option into one `SessionEnv`. Then it reads the
+system prompt and the skills from the sandbox, not from the output of the build.
 
 ```
 ctx.init(opts):
@@ -103,7 +126,12 @@ ctx.init(opts):
                            opts.commands, opts.tools)
 ```
 
-## `AgentClient` — session manager
+<a id="agentclient--session-manager"></a>
+
+## `AgentClient`: the Sessions of an agent
+
+The `AgentClient` keeps one `Session` for each Session ID. It loads the data of
+a Session from the store when the Session starts.
 
 ```
 class AgentClient:
@@ -126,7 +154,12 @@ class AgentClient:
         await env.cleanup()
 ```
 
-## `Session` — the harness nucleus
+<a id="session--the-harness-nucleus"></a>
+
+## `Session`: the core of the harness
+
+A `Session` contains the `Agent` of `pi-agent-core` and the history of the
+Session. It gives the calls `prompt`, `skill`, `task` and `shell`.
 
 ```
 class Session:
@@ -161,9 +194,12 @@ class Session:
                          return result
 ```
 
-### The clever bit: scoped runtime
+<a id="the-clever-bit-scoped-runtime"></a>
 
-This is how per-call overrides work without forking the underlying `Agent`.
+### The scoped runtime
+
+The scoped runtime lets one call change the tools, the model and the system
+prompt of the `Agent`. Flue does not make a second copy of the `Agent`.
 
 ```
 scopedRun(opts, fn):
@@ -194,7 +230,9 @@ run(promptText):
     return opts.result ? extractResult(opts.result) : { text: lastAssistantText() }
 ```
 
-### Compaction — context-window management
+<a id="compaction--context-window-management"></a>
+
+### Compaction: how Flue keeps the history in the context window
 
 ```
 maybeCompact():
@@ -213,7 +251,9 @@ compact():
     harness.messages = [systemPrompt, summary, ...keep]
 ```
 
-### Task subagents — recursive sessions
+<a id="task-subagents--recursive-sessions"></a>
+
+### Task subagents: Sessions that start Sessions
 
 ```
 runTask(text, opts):                                   # depth-bounded to 4
@@ -234,11 +274,15 @@ runTask(text, opts):                                   # depth-bounded to 4
     finally: child.close()
 ```
 
-The built-in `task` tool the LLM calls is just a thin wrapper around `runTask`, so subagent spawning works _both_ via `session.task()` from user code _and_ via the LLM autonomously delegating.
+The `task` tool of the LLM only calls `runTask`. Thus two sources can start a
+subagent: the code of the user with `session.task()`, and the LLM when it gives
+a task to a subagent.
 
-## The substrate: `SessionEnv`
+<a id="the-substrate-sessionenv"></a>
 
-The interface every sandbox mode satisfies:
+## The sandbox interface: `SessionEnv`
+
+Each type of sandbox supplies this interface:
 
 ```
 interface SessionEnv:
@@ -248,7 +292,7 @@ interface SessionEnv:
     cwd, resolvePath(p), cleanup()
 ```
 
-Concrete implementations:
+These functions supply the interface for each type of sandbox:
 
 ```
 virtualSandbox():    # default — in-memory just-bash, no host
@@ -262,7 +306,7 @@ cfSandboxToSessionEnv(durableObjectContainer): ...
 daytonaConnector.createSessionEnv({id, cwd}): ...
 ```
 
-And the **command injection trick** — how `Command`s become callable shell commands inside the sandbox:
+The commands of a call become shell commands in the sandbox with this method:
 
 ```
 scope(env, commands):
@@ -277,7 +321,11 @@ scope(env, commands):
         return interceptingProxy(env, commands)
 ```
 
-## Tool dispatch — what the LLM actually sees
+<a id="tool-dispatch--what-the-llm-actually-sees"></a>
+
+## The tools that the LLM sees
+
+Each tool is a thin adapter on the `SessionEnv`.
 
 ```
 builtinTools(env, ...):
@@ -302,9 +350,12 @@ bashTool(env) = {
 }
 ```
 
-Custom tools and MCP tools are funneled through the same `AgentTool` shape — uniform from the harness's POV.
+Your tools and the MCP tools have the same `AgentTool` shape. Thus the harness
+operates all tools with the same method.
 
-## Persistence — the typed entry log
+<a id="persistence--the-typed-entry-log"></a>
+
+## Storage: the log of entries
 
 ```
 SessionData = {
@@ -323,7 +374,13 @@ InMemorySessionStore        # Node default
 DurableObjectSqliteStore    # Cloudflare — survives across requests
 ```
 
-## Dev loop
+<a id="dev-loop"></a>
+
+## The `dev` loop
+
+On Node, `dev` makes the output again after each change. On Cloudflare,
+`wrangler` finds the changes, and `dev` writes the entry again only when the set
+of agents changes.
 
 ```
 dev(target):
@@ -346,7 +403,9 @@ dev(target):
 
 ---
 
-## The shape, in one diagram
+<a id="the-shape-in-one-diagram"></a>
+
+## The full shape
 
 ```
                     ┌──────────────────────────────────────────┐
@@ -378,6 +437,16 @@ dev(target):
                     └──────────────────────────────────────────┘
 ```
 
-The whole framework is essentially: **mount a `SessionEnv`, hand it to a `pi-agent-core` `Agent` with built-in tools that all bottom out at that `SessionEnv`, persist the message log as a typed entry chain, and expose three ways to drive it (`prompt` / `skill` / `task`) — each going through one `scopedRun` that swaps in per-call tools/model/role and swaps them back out.**
+In short, the core of Flue does these steps:
 
-Everything else — the build pipeline, the trigger layer, connectors, the dev server — is scaffolding around that core loop.
+1. It attaches a `SessionEnv`.
+2. It gives the `SessionEnv` to an `Agent` of `pi-agent-core`. All the tools of
+   this `Agent` operate on that `SessionEnv`.
+3. It keeps the messages as a sequence of entries with types. Each entry
+   connects to the entry before it.
+4. It gives three calls that operate the `Agent`: `prompt`, `skill` and `task`.
+   Each call goes through one `scopedRun`. `scopedRun` puts in the tools, the
+   model and the role of the call, and then puts back the previous values.
+
+The other parts are around this loop at the core: the build pipeline, the
+trigger layer, the connectors and the `dev` server.

@@ -1,111 +1,234 @@
 # AI Agents Theory
 
-A first-principles formalization of what AI agents are made of. The book answers: what is an Agent, what are its parts, and how do they compose?
+This book tells which parts make an AI agent and how these parts connect. It
+does not start from a product. It starts from the basic functions that each
+agent must have. The book tells:
 
-Most documentation describes agents in terms of specific products and frameworks (Claude Code, Cursor, Codex, LangGraph). The architecture underneath is **universal** — Claude Code, Codex, Cursor, Gemini CLI, PI are different Agents assembled from the same bricks. The model is not the differentiator; the composition is. This repository formalizes those universal building blocks using TypeScript-like pseudocode, so you can design any agent system from scratch — or look at an existing one and immediately see what it uses and what it's missing.
+- the definition of an Agent
+- which parts an Agent has
+- how these parts compose.
+
+Most documents about agents give one product or one framework, for example
+Claude Code, Cursor, Codex or LangGraph. But the structure below these products
+is the same for all of them. Claude Code, Codex, Cursor, Gemini CLI and PI are
+different Agents that are made of the same parts. The model does not make one
+Agent different from a different Agent. The composition does: the parts and how
+they connect.
+
+This book gives each part as a short type in TypeScript pseudocode. With these
+types, you can build an agent system from zero. You can also examine an agent
+system, and see quickly which parts it uses and which parts it does not have.
 
 ---
 
-## What Is an Agent?
+<a id="what-is-an-agent"></a>
 
-An **Agent** is a program that takes a task, reasons about it with a language model, picks actions (reading files, calling APIs, running shell commands), sees what happened, and keeps going until it's done. You invoke it somehow — on the command line, from another program, through a web request — and results come back through the same channel. When people say "I built an agent that triages my inbox," "the Claude Code agent," or "a Slack agent," they mean one of these runnable programs.
+## The Agent
 
-Underneath, every Agent has three parts:
+An **Agent** is a program that gets a task and uses a language model to think
+about the task. The model selects steps, for example: read files, call APIs or
+run shell commands. The Agent examines the result of each step and continues
+until it completes the task.
 
-- A **frontend** — how the outside world talks to it and where its output goes. A terminal reads your keystrokes and prints back; an SDK exposes a function call; a GitHub Action fires on an issue and writes a comment. Same Agent underneath, different frontends.
-- A **cognitive core** — the reasoning loop. The language model looks at the current situation, picks a tool to run, sees the result, and decides what's next. Turn by turn, the conversation accumulates. The theory calls this the **Session**, and the loop inside it the **[AgentLoop](harness/agent-loop.md)**.
-- An **environment** — the substrate it acts on. Your laptop's filesystem, a sandboxed container, a set of API credentials, a database. Two Agents with the exact same cognitive core can behave very differently depending on what's reachable in the environment.
+You start an Agent from the command line, from a different program or with a web
+request. The results come back through the same path. A person can speak about
+"an agent that triages my inbox", "the Claude Code agent" or "a Slack agent".
+Each of these is a program of this type.
 
-Written as a formula:
+Each Agent has these parts:
+
+- A **frontend**: the connection between the Agent and its users or other
+  programs. The frontend gets the input and sends the output. A terminal reads
+  the keys that you push and shows the output. An SDK gives a function that a
+  program calls. A GitHub workflow starts when a person opens an issue, and then
+  writes a comment. The Agent is the same in each example. Only the frontend is
+  different.
+- A **reasoning core**: the loop of the model. The model examines the condition
+  of the task, selects a tool to run, reads the result and selects the next
+  step. Each turn adds to the conversation. The theory calls this part the
+  **Session**, and the loop in it the **[AgentLoop](harness/agent-loop.md)**.
+- An **environment**: the files, programs and data that the Agent changes.
+  Examples are the filesystem of your computer, a container with a sandbox, a
+  set of API credentials and a database. Two Agents with the same reasoning core
+  can operate very differently. The cause is the resources that each environment
+  makes available.
+
+The composition of an Agent:
 
 ```
 Agent = Frontend + Session + Environment
 ```
 
-Everything else in this book is either (a) a piece of an Agent, (b) a way of building an Agent's parts, or (c) a composition that arranges multiple Agents or extends one.
+Each other concept of this book is one of these:
 
-See [Agent](harness/agent.md) for the formal definition, variants, and examples.
+- a part of an Agent
+- a method to build the parts of an Agent
+- a composition that connects two or more Agents, or that adds functions to one
+  Agent.
+
+[Agent](harness/agent.md) gives the full definition, the variants and the
+examples.
 
 ---
 
 ## The Parts of an Agent
 
-Every Agent decomposes into four kinds of concept, plus verification as an orthogonal concern:
+The concepts of an Agent are in these tiers:
 
-- **Primitives** — the atoms. Irreducible building blocks.
-- **Harness** — the machinery that makes an Agent runnable. Agent itself is the outer shell.
-- **Environment** — the substrate the Agent acts upon. Not part of the Agent; the world the Agent inhabits.
-- **Patterns** — optional arrangements that shape Agent behavior. Some Agents adopt them, others don't.
+- **Primitives**: the smallest parts. The theory cannot make them from other
+  parts.
+- **Harness**: the parts that let an Agent run. The Agent is the outer part of
+  the harness.
+- **Environment**: the files, programs and data that the Agent changes. It is
+  not a part of the Agent.
+- **Patterns**: optional structures that change how an Agent operates. Some
+  Agents use them, and other Agents do not.
+
+Verification is not a tier. It applies to all the tiers.
 
 ### Primitives
 
-A primitive is irreducible — it cannot be expressed as a composition of other concepts in the theory. LLM, Tool, and Prompt are the primitives.
+The primitives are the concepts that the theory cannot make from other concepts.
+LLM, Tool and Prompt are the primitives.
 
-| Primitive  | Definition                                                                             | Document                       |
-| ---------- | -------------------------------------------------------------------------------------- | ------------------------------ |
-| **LLM**    | Stateless function: `string → string` (Prompt in, text out)                            | [LLM](primitives/llm.md)       |
-| **Tool**   | Side effect: `(params) → result`                                                       | [Tool](primitives/tool.md)     |
-| **Prompt** | The protocol-formatted structured input to the LLM: system + tools + history + inserts | [Prompt](primitives/prompt.md) |
+| Primitive  | Definition                                                                                        | Document                       |
+| ---------- | ------------------------------------------------------------------------------------------------- | ------------------------------ |
+| **LLM**    | A function that keeps no data between calls: `string → string`. A Prompt goes in, text comes out. | [LLM](primitives/llm.md)       |
+| **Tool**   | An operation with a side effect: `(params) → result`.                                             | [Tool](primitives/tool.md)     |
+| **Prompt** | The input of the LLM in the format of its training: system prompt, tools, history, inserts        | [Prompt](primitives/prompt.md) |
 
 ### Harness
 
-The harness is the running-system skeleton — the structural machinery every running agent system has, whether or not the author thought in these terms: iterate the LLM → you have a loop; accumulate turns → you have a session; every tool call flows through a dispatch boundary where policies can intercept → you have a Guardrail; wrap a session in a frontend and pin it to an environment → you have an Agent.
+The harness is the structure that each agent system has when it runs, also if
+its author does not use these names:
 
-| Harness       | Composition                                            | Document                           |
-| ------------- | ------------------------------------------------------ | ---------------------------------- |
-| **AgentLoop** | LLM + Tool[] in a recursive cycle                      | [AgentLoop](harness/agent-loop.md) |
-| **Session**   | AgentLoop + history                                    | [Session](harness/session.md)      |
-| **Guardrail** | Tool-dispatch interception hooks + registered policies | [Guardrail](harness/guardrail.md)  |
-| **Agent**     | Frontend + Session + Environment                       | [Agent](harness/agent.md)          |
+- If you call the LLM again and again, you have a loop.
+- If you keep the turns, you have a Session.
+- Each tool call goes through one point before the tool runs, and policies can
+  stop the call there. This point is the Guardrail.
+- If you put a Session in a frontend and connect it to an environment, you have
+  an Agent.
+
+| Harness       | Composition                                                | Document                           |
+| ------------- | ---------------------------------------------------------- | ---------------------------------- |
+| **AgentLoop** | LLM + Tool[] in a loop that starts again after each result | [AgentLoop](harness/agent-loop.md) |
+| **Session**   | AgentLoop + history                                        | [Session](harness/session.md)      |
+| **Guardrail** | Hooks that stop each tool call + the policies of the hooks | [Guardrail](harness/guardrail.md)  |
+| **Agent**     | Frontend + Session + Environment                           | [Agent](harness/agent.md)          |
 
 ### Environment
 
-The Environment is what the Agent reaches through Tools — filesystem, processes, network, credentials. An Agent's effective capability is a function of its Environment, especially for generative tools like `bash` where `capability = f(environment)`. Sandboxes are restricted Environments; the Environment layer is where blast-radius control lives.
+The Environment is the set of resources that the Agent can use with its Tools:
+the filesystem, the processes, the network and the credentials. The Environment
+controls the functions of an Agent. This is most important for a tool that can
+do almost each operation, for example `bash`. For such a tool,
+`capability = f(environment)`. A sandbox is an Environment with limits. The
+Environment is the layer that makes the damage of an incorrect step smaller.
 
-| Concept         | Shape                                                                | Document                                  |
-| --------------- | -------------------------------------------------------------------- | ----------------------------------------- |
-| **Environment** | Resource bundle: code, runtime, OS, network, credentials, filesystem | [Environment](environment/environment.md) |
+| Concept         | Shape                                                                                 | Document                                  |
+| --------------- | ------------------------------------------------------------------------------------- | ----------------------------------------- |
+| **Environment** | A set of resources: code, runtime, operating system, network, credentials, filesystem | [Environment](environment/environment.md) |
 
 ### Patterns
 
-A pattern is a composition of primitives, harness, environment, and other patterns that names a distinct architectural role. Patterns are design choices — some Agents adopt them, others don't. Analogy from functional programming: `map`, `filter`, `reduce` are not new language constructs but patterns over recursion and functions. That doesn't make them less important — patterns are what you use every day.
+A pattern is a composition of primitives, harness concepts, the Environment and
+other patterns. It gives a name to one function in the structure of a system.
+Patterns are decisions about the structure: some Agents use them, and other
+Agents do not.
 
-| Pattern           | Composition                                                           | Document                                    |
-| ----------------- | --------------------------------------------------------------------- | ------------------------------------------- |
-| **PromptLoading** | `source → strategy → Prompt slot` (eager, lazy, progressive, dynamic) | [PromptLoading](patterns/prompt-loading.md) |
-| **Memory**        | Tool-set with cross-session persistence and knowledge-extraction role | [Memory](patterns/memory.md)                |
-| **StateMachine**  | Guardrail + phase variable + transition rules                         | [StateMachine](patterns/state-machine.md)   |
-| **Channel**       | Tool-set + convention (inter-agent data passing within a run)         | [Channel](patterns/channel.md)              |
-| **Planner**       | Session with read-only tools                                          | [Planner](patterns/planner.md)              |
-| **Router**        | Dispatch by input                                                     | [Router](patterns/router.md)                |
-| **Evaluator**     | LLM-as-judge + feedback loop                                          | [Evaluator](patterns/evaluator.md)          |
-| **Workspace**     | Tool-set with hierarchical namespace                                  | [Workspace](patterns/workspace.md)          |
-| **Continuity**    | Memory + PromptLoading + Guardrail + Tool                             | [Continuity](patterns/continuity.md)        |
-| **Topology**      | Session[] + Channel + Router, arranged in a coordination shape        | [Topology](patterns/topology.md)            |
+An example from code: `map`, `filter` and `reduce` are not new parts of a
+language. They are patterns of functions and of a function that calls the same
+function again. They are important all the same: you use patterns all the time.
+
+| Pattern           | Composition                                                                       | Document                                    |
+| ----------------- | --------------------------------------------------------------------------------- | ------------------------------------------- |
+| **PromptLoading** | `source → strategy → Prompt slot` (at the start, on request, in steps, each turn) | [PromptLoading](patterns/prompt-loading.md) |
+| **Memory**        | Tools that keep knowledge across Sessions and find the knowledge to keep          | [Memory](patterns/memory.md)                |
+| **StateMachine**  | Guardrail + phase variable + rules that change the phase                          | [StateMachine](patterns/state-machine.md)   |
+| **Channel**       | Tools + an agreed format that moves data between agents in one run                | [Channel](patterns/channel.md)              |
+| **Planner**       | Session with only tools that read                                                 | [Planner](patterns/planner.md)              |
+| **Router**        | Selection of a handler by the input                                               | [Router](patterns/router.md)                |
+| **Evaluator**     | LLM that examines the output + feedback loop                                      | [Evaluator](patterns/evaluator.md)          |
+| **Workspace**     | Tools on a tree of items with names                                               | [Workspace](patterns/workspace.md)          |
+| **Continuity**    | Memory + PromptLoading + Guardrail + Tool                                         | [Continuity](patterns/continuity.md)        |
+| **Topology**      | Session[] + Channel + Router, connected in a shape                                | [Topology](patterns/topology.md)            |
 
 ### Verification
 
-[Verification](verification/index.md) is orthogonal to the tiers above. It doesn't participate in agent reasoning, but every production Agent needs it: how do you confirm the system works, given that the LLM at its core is non-deterministic? Verification defines traces, seams, and strategies for testing Agents end-to-end.
+[Verification](verification/index.md) applies to all the tiers. It is not a part
+of the reasoning of an agent, but it is necessary for each Agent that customers
+use. The LLM in an Agent can give different outputs for the same input.
+Verification tells how to show that the system operates correctly all the same.
+It gives traces, seams and methods for tests of Agents from end to end.
 
 ---
 
 ## How to Read This
 
-These documents are not numbered chapters. Each is self-contained — you can start with any document that interests you and follow cross-references to deepen understanding.
+The documents do not have a sequence. You can read each document without the
+other documents. Start with the document that you want, and then follow the
+links to know more.
 
-**If you want to understand what an Agent is:** Start with [Agent](harness/agent.md). Then drill into its parts: [Session](harness/session.md), [AgentLoop](harness/agent-loop.md), [LLM](primitives/llm.md), [Tool](primitives/tool.md), [Environment](environment/environment.md). This gives you the core.
+**For the core of an Agent:** Start with [Agent](harness/agent.md). Then read
+about its parts: [Session](harness/session.md),
+[AgentLoop](harness/agent-loop.md), [LLM](primitives/llm.md),
+[Tool](primitives/tool.md) and [Environment](environment/environment.md).
 
-**If you want to understand what's missing from current Agents:** Read [Memory](patterns/memory.md) and [StateMachine](patterns/state-machine.md). Memory is the gap between "starts from zero every session" and "accumulates knowledge over time." StateMachine is the gap between "agent in a terminal" and "agent as a reliable workflow."
+**For an Agent that keeps knowledge and follows a workflow:** Read
+[Memory](patterns/memory.md) and [StateMachine](patterns/state-machine.md).
 
-**If you want to see the theory applied:** The [LangGraph case study](case-studies/langgraph.md) decomposes a bundled framework into the theory's vocabulary, revealing both what the framework gets right and where it makes constraining trade-offs. The [PI case study](case-studies/pi.md) decomposes the opposite design — a minimal core that exposes every concept boundary as an extension point — and cross-references it against the theory in both directions. The [Hermes Agent case study](case-studies/hermes.md) decomposes a persistent personal-agent framework whose realisation deepens how particular concepts — Prompt cache integrity, layered Memory views, Evaluator-shaped sub-Agents — can be utilised in practice.
+- Memory makes the difference between an agent that starts with no knowledge in
+  each Session and an agent that collects knowledge across Sessions.
+- StateMachine makes the difference between an agent in a terminal and an agent
+  that follows a workflow correctly each time.
+
+**For the theory on products:** Read the case studies.
+
+- The [LangGraph case study](case-studies/langgraph.md) divides a framework with
+  many parts in one package into the concepts of the theory. It shows the good
+  decisions of the framework, and the decisions that put limits on its users.
+- The [PI case study](case-studies/pi.md) examines the opposite structure: a
+  small core that lets a developer add code at the boundary of each concept. It
+  compares PI with the theory, and the theory with PI.
+- The [Hermes Agent case study](case-studies/hermes.md) examines a framework for
+  an agent of one person that operates all the time. It shows how some concepts
+  operate in a product:
+  - a cache of the Prompt that stays correct
+  - Memory in layers
+  - Agents that a different Agent starts, with the shape of an Evaluator.
+- The [Flue case study](case-studies/flue/README.md) examines a framework that
+  runs agents in sandboxes on servers.
+- The [Honcho case study](case-studies/honcho/README.md) examines a Memory
+  service for agents.
+
+**For security:** Read [Security](security/README.md). It is not a tier. It
+examines the dangerous results that an agent can cause. It also shows how the
+Environment, the Guardrail, the Tool and the Topology stop these results.
 
 ---
 
-## Composition Is the Differentiator
+<a id="composition-is-the-differentiator"></a>
 
-The universal framing has an empirical consequence: the same frontier model with different tool designs, context strategies, and guardrail configurations produces dramatically different performance on identical tasks. Two Agents differ not in some holistic, ineffable way, but in specific, enumerable configuration choices: which tools (capped search vs. raw grep), which memory (ground truth feature list vs. none), which guardrails (linter on edit vs. no feedback), which context strategy (progressive disclosure vs. context dump), which environment (laptop vs. sandbox). The composition is where the value lives. The model is commodity.
+## The Composition Makes the Difference
 
-Claude Code is one specific Agent:
+All Agents are made of the same parts. Thus the parts and their configuration
+control the result. The same model of the highest quality gives very different
+results on the same tasks with different tools, context methods and Guardrail
+configurations.
+
+Two Agents are different in a list of specified configuration decisions:
+
+- tools: a tool that finds text and gives a maximum number of results, or `grep`
+  with no limit
+- Memory: a correct list of features, or no Memory
+- Guardrails: a linter after each change, or no feedback
+- the context method: the context in steps, or all the context at the start
+- Environment: your computer or a sandbox.
+
+The value is in the composition. Many companies supply a model of the same
+quality.
+
+Claude Code is one specified Agent:
 
 ```typescript
 const claudeCode: Agent = {
@@ -118,18 +241,26 @@ const claudeCode: Agent = {
 };
 ```
 
-Codex, Cursor, Gemini CLI, PI — different Agents from the same bricks. Understanding the parts means understanding all of them.
+Codex, Cursor, Gemini CLI and PI are different Agents with the same parts. If
+you know the parts, you know all of these Agents.
 
 ---
 
 ## Who This Is For
 
-Engineers who want to think about Agents from first principles rather than learn a framework. If you've used Claude Code, Cursor, or Codex and wondered "what's actually going on under the hood?" — this gives you the vocabulary to answer that question for any Agent, current or future.
+This book is for engineers who want to think about Agents from the basic facts,
+and not from one framework. You possibly used Claude Code, Cursor or Codex, and
+wanted to know "what's actually going on under the hood?" This book gives you
+the words to tell how each Agent operates. The words apply to the Agents that
+persons use, and to the Agents that persons will make.
 
-## Status
+<a id="status"></a>
 
-Living documents. The theory evolves as new Agents emerge and are analyzed.
+## Changes
+
+The documents change. The theory changes when persons make new Agents and the
+author examines them.
 
 ## License
 
-[MIT](LICENSE)
+The [LICENSE](LICENSE) file gives the "MIT License".

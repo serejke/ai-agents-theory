@@ -1,10 +1,20 @@
-# Honcho Architecture
+<a id="honcho-architecture"></a>
 
-Honcho is memory infrastructure for LLM agents. It continuously analyzes conversational data and constructs detailed peer profiles over time. Messages are written through a REST API, processed asynchronously by background workers, and recalled through a natural-language query endpoint that returns grounded answers about any peer.
+# The Structure of Honcho
 
-## Data Model
+Honcho is a Memory service for agents. It examines the conversations
+continuously and builds a profile of each peer. The profile gets more facts with
+time.
 
-The platform centers on four primary entities in a hierarchical relationship:
+The agents write messages through an HTTP API. Workers examine these messages
+after the API stores them, and the API does not wait for the workers. A query
+endpoint accepts a query in usual English and gives a reply about a peer. Each
+part of this reply comes from the stored conclusions.
+
+## Data model
+
+The data model has these items. A workspace holds peers and Honcho sessions. A
+Honcho session holds messages.
 
 ```mermaid
 graph LR
@@ -21,43 +31,104 @@ graph LR
       style SM fill:#B6DBFF,stroke:#333,color:#000
 ```
 
-- **Workspaces** are top-level containers providing complete isolation between applications or environments. They serve as namespaces for separate workloads and enable multi-tenant SaaS architectures where each customer maintains isolated data.
-- **Peers** represent the core focus — any individual user, agent, or persistent entity. Everything in the system revolves around building and maintaining their representations. A peer can span multiple sessions while accumulating cross-session context.
-- **Sessions** establish interaction threads or temporal boundaries between peers. They scope context to specific interactions while preserving longer-term peer understanding across sessions.
-- **Messages** are the fundamental interaction units within sessions. Beyond typical communication, they can represent emails, documents, files, user actions, system notifications, or rich media content.
+- **Workspaces** are the containers at the top. Each workspace isolates its data
+  fully from the other programs or environments. One workspace holds the data of
+  one group of tasks. Thus a service for many customers can keep the data of
+  each customer isolated.
+- **Peers** are the primary items of the system. A peer is a user, an agent or a
+  different item that stays for a long time. All of the system builds and keeps
+  the profiles of peers. A peer can be in two or more Honcho sessions. It
+  collects context across these Honcho sessions.
+- **Honcho sessions** are threads of conversation between peers, or limits in
+  time. In a Honcho session, the context comes only from the conversations of
+  that Honcho session. But Honcho keeps the knowledge about each peer across
+  Honcho sessions.
+- **Messages** are the basic units of conversation in a Honcho session. A
+  message can be a usual message. It can also be an email, a document, a file, a
+  step of a user, a system notification, an image or a sound file.
 
-### Representation as a typed graph
+<a id="representation-as-a-typed-graph"></a>
 
-The artifact the system actually produces and queries is a peer's **representation** — atomic conclusions about that peer derived from messages. Each conclusion carries an inference level and a link to its sources:
+### The profile: a graph of conclusions
 
-- `explicit` — directly stated in a message.
-- `deductive` — logically necessary given a set of explicit conclusions.
-- `inductive` — a pattern across multiple conclusions.
-- `contradiction` — an inconsistency between conclusions.
+The primary output of Honcho is the profile of a peer. Honcho calls it a
+"representation". A profile is a set of atomic conclusions about a peer. Honcho
+derives them from messages. Each conclusion has a level and a link to its
+sources. These are the levels:
 
-Every conclusion's `source_ids` point at the conclusions or messages it was derived from. The representation is therefore a **provenance-tracked reasoning graph**, not a flat list of facts: any claim can be expanded back to its evidence. A bounded **peer card** — a curated biographical summary refined over time — sits on top as the durable identity layer.
+- `explicit`: a message gives the conclusion directly.
+- `deductive`: the conclusion must be correct because of a set of `explicit`
+  conclusions.
+- `inductive`: the conclusion is a pattern across two or more conclusions.
+- `contradiction`: two conclusions do not agree.
 
-The cost-shape rationale for splitting reasoning across these levels is in [case-study.md](case-study.md).
+The `source_ids` of each conclusion point to the conclusions or the messages
+that it comes from. Thus the profile is a graph of reasoning, with a link from
+each fact to its source. It is not a flat list of facts. An agent can follow
+each fact back to the messages below it.
 
-## Processing Architecture
+On top of the profile, Honcho keeps the **peer card**. The peer card is a short
+text about the life and the work of the peer. It has a maximum length. Honcho
+continuously makes it better. It holds the stable facts about who the peer is.
 
-Agents write messages to Honcho, which triggers reasoning that updates peer representations. Insights are read back through a query API.
+[`case-study.md`](case-study.md) gives the cause of these levels: each level
+uses a different quantity of tokens.
 
-![Honcho data flow: messages enter through the API, trigger asynchronous reasoning, and update storage; insights are returned through the same API. Black arrows are regular data operations; red arrows are reasoned data operations.](images/architecture.png)
+<a id="processing-architecture"></a>
 
-Data flows through the system asynchronously: messages written via the API are persisted immediately and then trigger background reasoning tasks. Workers generate conclusions, summaries, and insights and store them alongside the messages. Query endpoints retrieve relevant conclusions plus recent messages to assemble grounded context for downstream agent prompts.
+## The flow of the data
 
-### The cognitive loop
+Agents write messages to Honcho. Each message starts reasoning that changes the
+profiles of peers. The agents read the results back through a query API.
 
-The asynchronous workers form a cognitive loop operating at three latencies — fast extraction on every message, deeper consolidation on idle peers, query-time reasoning on each recall. The conceptual framing of these stages, and why they're split this way rather than collapsed into a single worker, is the subject of [case-study.md](case-study.md).
+![The flow of the data in Honcho. Messages go into the API. They start the
+reasoning, which does not stop the API, and the reasoning changes the storage.
+The same API gives back the results. A black arrow is a usual data operation.
+A red arrow is a data operation with reasoning.](images/architecture.png)
 
-## Design Philosophy
+The data moves through the system in these steps:
 
-The architecture emphasizes:
+1. The API stores each message immediately.
+2. Each stored message starts reasoning tasks. The API does not wait for these
+   tasks.
+3. The workers make conclusions, short descriptions and new knowledge. They
+   store these results adjacent to the messages.
+4. The query endpoints get the related conclusions and the last messages. They
+   assemble them into context for the prompts of the agents downstream.
 
-- **Peer-centric organization.** Humans and agents are both peers. Observation relationships are configurable per pair.
-- **Reasoning-first memory.** Documents are not stored verbatim; they are atomic conclusions derived from messages, with provenance back to source.
-- **Asynchronous processing.** Message ingestion never blocks on LLM work. Reasoning happens on read or on idle, not on write.
-- **Provider-agnostic LLM support.** Anthropic, OpenAI, and Gemini are interchangeable behind a single surface.
-- **Multi-tenant scalability.** Workspaces isolate data; workers coordinate through the shared database.
-- **Unified treatment of users and agents as peers.** A query about what one peer knows of another, and a query about the omniscient view of a peer, are the same primitive with different `(observer, observed)` pairs.
+<a id="the-cognitive-loop"></a>
+
+### The workers and their latencies
+
+The workers make a loop of reasoning. Each part of this loop operates at a
+different latency:
+
+- At each message, a fast step finds the facts in the message.
+- When no new messages come from a peer, a slower step makes deeper conclusions
+  from the facts.
+- At each query, Honcho does reasoning to make the reply.
+
+[`case-study.md`](case-study.md) gives the concept of these steps. It also gives
+the cause of the division into these steps, and not into one worker.
+
+<a id="design-philosophy"></a>
+
+## The rules of the structure
+
+The structure of Honcho follows these rules:
+
+- **Peers are the primary items.** Persons and agents are peers. The developer
+  can set which pairs of peers see each other.
+- **Memory comes from reasoning.** Honcho does not store the full text of
+  documents. It stores atomic conclusions that it derives from messages. Each
+  conclusion has a link back to its source.
+- **LLM work does not stop the API.** The API does not wait for LLM work before
+  it stores a message. Reasoning occurs when the agent reads, or when no new
+  messages come from the peer. It does not occur when the agent writes.
+- **The LLM provider is interchangeable.** Anthropic, OpenAI and Gemini are
+  interchangeable behind one interface.
+- **The system can operate for many customers.** Workspaces isolate the data.
+  The workers use the same database to operate together.
+- **Users and agents are all peers.** A query can get the facts that one peer
+  knows about a different peer. A query can also get the full view of a peer.
+  These queries are the same query with a different pair `(observer, observed)`.
